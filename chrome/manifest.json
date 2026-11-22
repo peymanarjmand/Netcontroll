@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3, "name": "Netcontroll · مسیر دامنه‌ها", "version": "1.0.0",
+  "description": "Connect this Chrome profile to your local Netcontroll routing rules.",
+  "permissions": ["proxy", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "worker.js"},
+  "action": {"default_popup": "popup.html", "default_title": "Netcontroll"}
+}
