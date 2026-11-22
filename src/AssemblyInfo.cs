@@ -3,5 +3,5 @@ using System.Reflection;
 [assembly:AssemblyCompany("peymanarjmand")]
 [assembly:AssemblyProduct("Netcontroll")]
 [assembly:AssemblyCopyright("Copyright peymanarjmand")]
-[assembly:AssemblyVersion("1.0.0.0")]
-[assembly:AssemblyFileVersion("1.0.0.0")]
+[assembly:AssemblyVersion("1.0.1.0")]
+[assembly:AssemblyFileVersion("1.0.1.0")]

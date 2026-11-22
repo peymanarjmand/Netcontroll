@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -16,6 +17,9 @@ static class Setup
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Netcontroll");
     static readonly string Shortcut =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Netcontroll.lnk");
+    static readonly string DesktopShortcut =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Netcontroll.lnk");
+    static readonly string ApplicationPath = Path.Combine(Root, "Netcontroll.exe");
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Netcontroll";
     static readonly string[] Files = {
         "Netcontroll.exe",  "Main.xaml",         @"chrome\manifest.json", @"chrome\popup.html",
@@ -80,17 +84,12 @@ static class Setup
                 Directory.Move(Root, backup);
             Directory.Move(stage, Root);
             movedNewFiles = true;
-            dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
-            dynamic link = shell.CreateShortcut(Shortcut);
-            link.TargetPath = Path.Combine(Root, "Netcontroll.exe");
-            link.WorkingDirectory = Root;
-            link.IconLocation = link.TargetPath + ",0";
-            link.Save();
+            CreateShortcut(Shortcut);
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
                 key.SetValue("DisplayName", "Netcontroll");
                 key.SetValue("Publisher", "peymanarjmand");
-                key.SetValue("DisplayVersion", "1.0.0");
+                key.SetValue("DisplayVersion", Application.ProductVersion);
                 key.SetValue("InstallLocation", Root);
                 key.SetValue("DisplayIcon", Path.Combine(Root, "Netcontroll.exe"));
                 key.SetValue("UninstallString", "\"" + Path.Combine(Root, "Setup.exe") + "\" --uninstall");
@@ -108,7 +107,8 @@ static class Setup
             else if (movedNewFiles)
             {
                 Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
-                File.Delete(Shortcut);
+                if (IsOurShortcut(Shortcut))
+                    File.Delete(Shortcut);
                 RemovePayload(Root);
             }
             throw;
@@ -121,10 +121,34 @@ static class Setup
         if (Directory.Exists(backup))
             RemovePayload(backup);
     }
+    static bool IsOurShortcut(string path)
+    {
+        if (!File.Exists(path))
+            return false;
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+        string target = shell.CreateShortcut(path).TargetPath;
+        return String.Equals(target, ApplicationPath, StringComparison.OrdinalIgnoreCase);
+    }
+    static void CreateShortcut(string path)
+    {
+        if (File.Exists(path) && !IsOurShortcut(path))
+            throw new IOException("یک میان‌بر هم‌نام با مقصد دیگری در این محل وجود دارد.");
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+        dynamic link = shell.CreateShortcut(path);
+        link.TargetPath = ApplicationPath;
+        link.WorkingDirectory = Root;
+        link.IconLocation = ApplicationPath + ",0";
+        link.Save();
+    }
     static void RemovePayload(string dir)
     {
         foreach (string name in Files.Concat(new[] { "Setup.exe" }))
-            File.Delete(Path.Combine(dir, name));
+        {
+            string path = Path.Combine(dir, name);
+            if (File.Exists(path))
+                File.Delete(path);
+        }
         foreach (string sub in new[] { "chrome", "system" })
         {
             string p = Path.Combine(dir, sub);
@@ -153,8 +177,91 @@ static class Setup
             }
         }
         Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
-        File.Delete(Shortcut);
+        if (IsOurShortcut(Shortcut))
+            File.Delete(Shortcut);
+        if (IsOurShortcut(DesktopShortcut))
+            File.Delete(DesktopShortcut);
         RemovePayload(Root);
+    }
+    static int ShowInstaller()
+    {
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        using (var form = new Form())
+        {
+            form.Text = "نصب Netcontroll";
+            form.StartPosition = FormStartPosition.CenterScreen;
+            form.FormBorderStyle = FormBorderStyle.FixedDialog;
+            form.MaximizeBox = false;
+            form.AutoScaleMode = AutoScaleMode.Dpi;
+            form.Font = new Font("Segoe UI", 10);
+            form.BackColor = Color.White;
+            form.ClientSize = new Size(500, 330);
+            form.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            var layout = new TableLayoutPanel {
+                Dock = DockStyle.Fill, Padding = new Padding(22, 16, 22, 15), ColumnCount = 1, RowCount = 6
+            };
+            foreach (int height in new[]{47, 40, 36, 41})
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+            form.Controls.Add(layout);
+            var title = new Label {Text = "نصب Netcontroll", Dock = DockStyle.Fill,
+                RightToLeft = RightToLeft.Yes, Font = new Font(form.Font.FontFamily, 19, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20,65,57)};
+            var description = new Label {Text = "برنامه برای حساب ویندوز شما در این پوشه نصب می‌شود.",
+                Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes, TextAlign = ContentAlignment.MiddleLeft};
+            var location = new TextBox {Text = Root, Dock = DockStyle.Fill, ReadOnly = true, Name = "InstallLocation"};
+            var desktop = new CheckBox {Text = "میان‌بر روی دسکتاپ بساز", Checked = true, Name = "DesktopShortcut",
+                Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes};
+            var status = new Label {Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes,
+                TextAlign = ContentAlignment.MiddleLeft, Name = "SetupStatus"};
+            var buttons = new FlowLayoutPanel {Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft};
+            var next = new Button {Text = "نصب برنامه", Name = "PrimaryAction", Size = new Size(145, 36),
+                BackColor = Color.FromArgb(20,99,77), ForeColor = Color.White, FlatStyle = FlatStyle.Flat};
+            var close = new Button {Text = "بستن", Size = new Size(85,36), DialogResult = DialogResult.Cancel};
+            layout.Controls.Add(title); layout.Controls.Add(description); layout.Controls.Add(location);
+            layout.Controls.Add(desktop); layout.Controls.Add(status); layout.Controls.Add(buttons);
+            buttons.Controls.Add(next); buttons.Controls.Add(close);
+            form.AcceptButton = next; form.CancelButton = close;
+            bool installed = false;
+            if (File.Exists(ApplicationPath))
+                next.Text = "نصب مجدد / به‌روزرسانی";
+            next.Click += (s,e) => {
+                if (installed)
+                {
+                    try { Process.Start(ApplicationPath); form.Close(); }
+                    catch (Exception ex) { status.Text = ex.GetBaseException().Message; }
+                    return;
+                }
+                next.Enabled = close.Enabled = desktop.Enabled = false;
+                form.UseWaitCursor = true;
+                try
+                {
+                    status.Text = "در حال کپی فایل‌ها و ثبت در منوی Start…";
+                    form.Refresh();
+                    Install();
+                    installed = true;
+                    title.Text = "نصب انجام شد";
+                    next.Text = "باز کردن برنامه";
+                    status.Text = "Netcontroll از منوی Start قابل اجراست.";
+                    if (desktop.Checked)
+                    {
+                        try { CreateShortcut(DesktopShortcut); status.Text = "از دسکتاپ یا منوی Start می‌توانید برنامه را باز کنید."; }
+                        catch (Exception ex) { status.Text += " ساخت میان‌بر دسکتاپ انجام نشد. " + ex.GetBaseException().Message; }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    status.Text = "نصب تکمیل نشد. " + ex.GetBaseException().Message;
+                    desktop.Enabled = true;
+                }
+                finally { form.UseWaitCursor = false; next.Enabled = close.Enabled = true; }
+            };
+            form.Shown += (s,e) => { form.Activate(); next.Focus(); };
+            form.ShowDialog();
+            return 0;
+        }
     }
     [STAThread]
     static int Main(string[] args)
@@ -188,15 +295,7 @@ static class Setup
                 MessageBox.Show("برنامه حذف شد.", "Netcontroll");
                 return 0;
             }
-            if (MessageBox.Show("Netcontroll برای حساب ویندوز شما نصب شود؟", "نصب Netcontroll",
-                                MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1,
-                                MessageBoxOptions.RtlReading) != DialogResult.Yes)
-                return 0;
-            Install();
-            if (MessageBox.Show("نصب انجام شد. برنامه باز شود؟", "Netcontroll", MessageBoxButtons.YesNo) ==
-                DialogResult.Yes)
-                Process.Start(Path.Combine(Root, "Netcontroll.exe"));
-            return 0;
+            return ShowInstaller();
         }
         catch (Exception ex)
         {
