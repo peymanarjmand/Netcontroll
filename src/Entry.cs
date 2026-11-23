@@ -17,8 +17,20 @@ static class Entry
     [STAThread]
     public static int Main(string[] args)
     {
-        using (var single = new Mutex(false, @"Local\Netcontroll.Desktop.1")) using (
-            var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Netcontroll.Show.1"))
+        AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
+        using (
+            var updateExit = new EventWaitHandle(
+                false, EventResetMode.AutoReset,
+                @"Local\Netcontroll.ExitForUpdate.1")) using (var single =
+                                                                  new Mutex(false,
+                                                                            @"Local\Netcontroll.Desktop." +
+                                                                            @"1")) using (var wake =
+                                                                                              new EventWaitHandle(
+                                                                                                  false,
+                                                                                                  EventResetMode
+                                                                                                      .AutoReset,
+                                                                                                  @"Local\Netcon" +
+                                                                                                  @"troll.Show.1"))
         {
             bool own = false;
             try
@@ -74,6 +86,18 @@ static class Entry
                         };
                         var registration = ThreadPool.RegisterWaitForSingleObject(
                             wake, (o, t) => app.Dispatcher.BeginInvoke(show), null, -1, false);
+                        var updateRegistration = ThreadPool.RegisterWaitForSingleObject(
+                            updateExit,
+                            (o, t) => app.Dispatcher.BeginInvoke(new Action(
+                                () =>
+                                {
+                                    if (!shell.CanExitForUpdate ||
+                                        app.Windows.Cast<Window>().Any(win => win != w && win.IsVisible))
+                                        return;
+                                    quit = true;
+                                    app.Shutdown();
+                                })),
+                            null, -1, false);
                         try
                         {
                             app.MainWindow = w;
@@ -83,6 +107,7 @@ static class Entry
                         }
                         finally
                         {
+                            updateRegistration.Unregister(null);
                             registration.Unregister(null);
                             tray.Visible = false;
                             shell.Dispose();

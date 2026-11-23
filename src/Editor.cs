@@ -14,16 +14,16 @@ public sealed class Editor
         bool app = page == "apps", ip = page == "ips";
         var w = new Window { Owner = owner,
                              WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                             Width = 455,
+                             Width = 490,
                              SizeToContent = SizeToContent.Height,
                              ResizeMode = ResizeMode.NoResize,
                              Title = old == null ? "افزودن قانون" : "ویرایش قانون",
                              FlowDirection = FlowDirection.RightToLeft,
                              FontFamily = owner.FontFamily,
-                             Background = Brushes.White,
                              Resources = owner.Resources };
         var panel = new StackPanel { Margin = new Thickness(24) };
-        w.Content = panel;
+        Netcontroll.Design.Theme.Attach(w, false);
+        w.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         panel.Children.Add(new TextBlock { Text = w.Title, FontSize = 23, FontWeight = FontWeights.SemiBold,
                                            Margin = new Thickness(0, 0, 0, 14) });
         Action<string> label = t =>
@@ -51,13 +51,19 @@ public sealed class Editor
             panel.Children.Add(browse);
         }
         label("مسیر اتصال");
-        var mode = new ComboBox { Padding = new Thickness(7),
-                                  ItemsSource = ip ? new[] { "اینترنت عادی", "فقط VPN" }
-                                                   : new[] { "اینترنت عادی", "فقط VPN", "مسیر سیستم" },
-                                  SelectedIndex = result.Mode == PathMode.Direct ? 0
-                                                  : result.Mode == PathMode.Vpn  ? 1
-                                                                                 : 2 };
-        panel.Children.Add(mode);
+        var modes = new WrapPanel();
+        PathMode selected = result.Mode;
+        foreach (var option in ip ? new[] { PathMode.Direct, PathMode.Vpn }
+                                  : new[] { PathMode.Direct, PathMode.Vpn, PathMode.System })
+        {
+            var radio = new RadioButton { Content = option == PathMode.Direct ? "اینترنت عادی"
+                                                    : option == PathMode.Vpn  ? "فقط VPN"
+                                                                              : "مسیر سیستم",
+                                          IsChecked = selected == option };
+            radio.Checked += (sender, args) => selected = option;
+            modes.Children.Add(radio);
+        }
+        panel.Children.Add(modes);
         var sub = new CheckBox { Content = "زیردامنه‌ها هم شامل شوند",
                                  IsChecked = result.Subdomains, Margin = new Thickness(0, 12, 0, 0) };
         if (!app && !ip)
@@ -69,11 +75,12 @@ public sealed class Editor
                                    IsChecked = result.Guard, Margin = new Thickness(0, 7, 0, 4) };
         if (app)
             panel.Children.Add(guard);
-        var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
+        var error = new TextBlock { Foreground = Brushes.LightSalmon, TextWrapping = TextWrapping.Wrap };
         panel.Children.Add(error);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         panel.Children.Add(buttons);
         var save = new Button { Content = "ذخیره", IsDefault = true };
+        save.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
         buttons.Children.Add(save);
         buttons.Children.Add(new Button { Content = "انصراف", IsCancel = true });
         save.Click += (s, e) =>
@@ -99,9 +106,7 @@ public sealed class Editor
                 result.Enabled = enabled.IsChecked == true;
                 result.Subdomains = sub.IsChecked == true;
                 result.Guard = app && guard.IsChecked == true;
-                result.Mode = mode.SelectedIndex == 0   ? PathMode.Direct
-                              : mode.SelectedIndex == 1 ? PathMode.Vpn
-                                                        : PathMode.System;
+                result.Mode = selected;
                 w.DialogResult = true;
             }
             catch (Exception ex)

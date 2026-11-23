@@ -19,6 +19,13 @@ public sealed class Shell : IDisposable
     Settings data;
     string page = "chrome";
     bool busy;
+    internal bool CanExitForUpdate
+    {
+        get {
+            return !busy && w.IsEnabled;
+        }
+    }
+    bool compact;
     List<Discovered> discovered = new List<Discovered>();
     bool showOther;
     string discoveryError = "";
@@ -31,11 +38,12 @@ public sealed class Shell : IDisposable
     readonly string[] icons = { "\uE774", "\uE968", "\uE7B8", "\uECAA", "\uE9D9" };
     readonly string[] descriptions = {
         "مسیر اتصال وب را برای هر دامنه و زیردامنه انتخاب کنید.",
-        "سرورها را با نام ذخیره کنید و مسیر آن‌ها را برای کل ویندوز تعیین " +
-        "کنید.",
+        "سرورها را با نام ذخیره کنید و مسیر آن‌ها را برای کل ویندوز " +
+        "تعیین " +
+            "کنید.",
         "مسیر دانلود ایمیج‌ها را برای Docker Desktop انتخاب کنید.",
         "برای برنامه‌های سازگار با پراکسی، مسیر جداگانه انتخاب " +
-        "کنید.",
+            "کنید.",
         "اتصال‌های اخیر پراکسی محلی و آدرس خروجی هر اتصال."
     };
     T C<T>(string key)
@@ -50,6 +58,19 @@ public sealed class Shell : IDisposable
     public Shell(Window window, Settings settings, Router engine)
     {
         w = window;
+        Netcontroll.Design.Theme.Attach(w);
+        w.SizeChanged += (s, e) =>
+        {
+            bool small = e.NewSize.Width < 820;
+            if (small == compact)
+                return;
+            compact = small;
+            C<Border>("Sidebar").Width = compact ? 76 : 206;
+            C<TextBlock>("BrandName").Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            C<StackPanel>("Credit").Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            C<Grid>("Body").Margin = compact ? new Thickness(12) : new Thickness(27, 22, 27, 22);
+            BuildNav();
+        };
         data = settings;
         router = engine;
         C<TextBox>("Search").TextChanged += (s, e) => RenderRows();
@@ -89,7 +110,9 @@ public sealed class Shell : IDisposable
             {
                 text = "در دسترس نیست";
             }
-            C<TextBlock>(p == PathMode.Direct ? "Direct" : "Vpn").Text = text;
+            var label = C<TextBlock>(p == PathMode.Direct ? "Direct" : "Vpn");
+            label.Text = text;
+            label.ToolTip = text;
         }
     }
     void BuildNav()
@@ -103,7 +126,8 @@ public sealed class Shell : IDisposable
             row.Children.Add(new TextBlock { Text = icons[i], FontFamily = new FontFamily("Segoe MDL2 Assets"),
                                              FontSize = 16, VerticalAlignment = VerticalAlignment.Center,
                                              Margin = new Thickness(0, 0, 9, 0) });
-            row.Children.Add(new TextBlock { Text = titles[i] });
+            if (!compact)
+                row.Children.Add(new TextBlock { Text = titles[i] });
             var b = Button("", () =>
                                {
                                    page = k;
@@ -112,11 +136,14 @@ public sealed class Shell : IDisposable
                                    Render();
                                });
             b.Content = row;
+            b.ToolTip = titles[i];
+            System.Windows.Automation.AutomationProperties.SetName(b, titles[i]);
             System.Windows.Automation.AutomationProperties.SetAutomationId(b, "Nav." + k);
-            b.HorizontalContentAlignment = HorizontalAlignment.Right;
-            b.Background = B(k == page ? "#28545A" : "#18363D");
-            b.Foreground = B(k == page ? "#A4F4D6" : "#E1ECEC");
-            b.Padding = new Thickness(10, 12, 10, 12);
+            b.HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+            b.Background = B(k == page ? "#343047" : "#181A26");
+            b.Foreground = B(k == page ? "#D7CBFF" : "#BAC0D2");
+            b.BorderBrush = B(k == page ? "#685A84" : "#181A26");
+            b.Padding = compact ? new Thickness(1, 12, 1, 12) : new Thickness(12, 12, 12, 12);
             nav.Children.Add(b);
         }
     }
@@ -125,9 +152,10 @@ public sealed class Shell : IDisposable
         var b = new Button { Content = label };
         if (primary)
         {
-            b.Background = B("#116951");
-            b.Foreground = Brushes.White;
+            b.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
         }
+        if (label.StartsWith("حذف"))
+            b.Foreground = B("#F6AEC1");
         b.Click += (s, e) =>
         {
             try
@@ -189,14 +217,16 @@ public sealed class Shell : IDisposable
                                                           }
                                                           RenderRows();
                                                       }));
-        Tell(page == "chrome" ? "قانون دقیق‌تر دامنه اولویت دارد. هر تب بر اساس میزبان هر درخواست مسیریابی " +
-                                "می‌شود."
+        Tell(page == "chrome" ? "قانون دقیق‌تر دامنه اولویت دارد. هر تب بر اساس میزبان هر درخواست " +
+                                "مسیریابی " +
+                                    "می‌شود."
              : page == "ips"
                  ? "تغییر مسیر سیستم با تأیید مدیر ویندوز اعمال می‌شود."
              : page == "apps" ? "برنامه را از همین صفحه اجرا کنید یا نشانی پراکسی را در تنظیمات خودش وارد کنید."
-             : page == "docker" ? "انتخاب مسیر برای اتصال‌های جدید پراکسی Docker اعمال " +
-                                  "می‌شود."
-                                : "فقط در حافظهٔ این اجرا نگه‌داری می‌شود.");
+             : page == "docker"
+                 ? "انتخاب مسیر برای اتصال‌های جدید پراکسی Docker اعمال " +
+                       "می‌شود."
+                 : "فقط در حافظهٔ این اجرا نگه‌داری می‌شود.");
         RenderRows();
         if (page == "ips" && discoveryError.Length > 0)
             Tell(discoveryError);
@@ -286,9 +316,9 @@ public sealed class Shell : IDisposable
     }
     void Card(string title, string detail, IEnumerable<Button> actions, string badge = null)
     {
-        var border = new Border { Background = Brushes.White,
-                                  CornerRadius = new CornerRadius(9),
-                                  BorderBrush = B("#D4E1E1"),
+        var border = new Border { Background = B("#1A1D2A"),
+                                  CornerRadius = new CornerRadius(13),
+                                  BorderBrush = B("#373B50"),
                                   BorderThickness = new Thickness(1),
                                   Padding = new Thickness(15, 11, 15, 11),
                                   Margin = new Thickness(0, 0, 0, 8) };
@@ -297,17 +327,23 @@ public sealed class Shell : IDisposable
         var top = new DockPanel();
         if (badge != null)
         {
-            var tag =
-                new Border { Background = B("#E7F2EE"), CornerRadius = new CornerRadius(5),
-                             Padding = new Thickness(9, 2, 9, 2), VerticalAlignment = VerticalAlignment.Center,
-                             Child = Line(badge, 12, "#255F4A") };
-            DockPanel.SetDock(tag, Dock.Left);
+            var tag = new Border { Background = B(badge == "فقط VPN"   ? "#373049"
+                                                  : badge == "غیرفعال" ? "#303343"
+                                                                       : "#243C38"),
+                                   CornerRadius = new CornerRadius(7), Padding = new Thickness(9, 2, 9, 2),
+                                   VerticalAlignment = VerticalAlignment.Center,
+                                   Child = Line(badge, 13,
+                                                badge == "فقط VPN"   ? "#D9C9FF"
+                                                : badge == "غیرفعال" ? "#C9CAD5"
+                                                                     : "#A5EACF") };
+            tag.Margin = new Thickness(10, 0, 0, 0);
+            DockPanel.SetDock(tag, Dock.Right);
             top.Children.Add(tag);
         }
-        top.Children.Add(Line(title, 16, "#19383E", true));
+        top.Children.Add(Line(title, 16, "#F2F2FC", true));
         stack.Children.Add(top);
         if (!String.IsNullOrEmpty(detail))
-            stack.Children.Add(Line(detail, 13, "#506971"));
+            stack.Children.Add(Line(detail, 13, "#B3B8CC"));
         var group = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         foreach (var b in actions)
             group.Children.Add(b);
@@ -391,6 +427,7 @@ public sealed class Shell : IDisposable
                          item.Saved == null ? "مسیر سیستمی" : "ذخیره‌شده");
                 }
         }
+        C<Border>("EmptyPanel").Visibility = list.Children.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (list.Children.Count == 0)
         {
             string title = filter.Length > 0  ? "موردی پیدا نشد"
@@ -398,11 +435,13 @@ public sealed class Shell : IDisposable
                            : page == "ips"    ? "اولین سرور را اضافه کنید"
                            : page == "apps"   ? "یک برنامه انتخاب کنید"
                                               : "هنوز اتصالی ثبت نشده";
-            Card(title,
-                 page == "chrome" && filter.Length == 0
-                     ? "نام دامنه و مسیر دلخواه را ثبت کنید، سپس Chrome را به برنامه وصل کنید."
-                     : "",
-                 new Button[0]);
+            C<TextBlock>("EmptyIcon").Text = filter.Length == 0 ? icons[Array.IndexOf(keys, page)] : "\uE721";
+            C<TextBlock>("EmptyTitle").Text = title;
+            var detail = C<TextBlock>("EmptyDetail");
+            detail.Text = page == "chrome" && filter.Length == 0
+                              ? "نام دامنه و مسیر دلخواه را ثبت کنید، سپس Chrome را به برنامه وصل کنید."
+                              : "";
+            detail.Visibility = detail.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         }
     }
     void Rename(string ip, Rule rule)
@@ -422,8 +461,9 @@ public sealed class Shell : IDisposable
                                   Resources = w.Resources,
                                   ResizeMode = ResizeMode.NoResize };
         var panel = new StackPanel { Margin = new Thickness(20) };
+        Netcontroll.Design.Theme.Attach(dialog, false);
         dialog.Content = panel;
-        panel.Children.Add(Line(ip, 16, "#19383E"));
+        panel.Children.Add(Line(ip, 16, "#F2F2FC"));
         var box = new TextBox { Text = previous, MaxLength = 80, Margin = new Thickness(0, 8, 0, 8) };
         panel.Children.Add(box);
         var ok = Button("ذخیرهٔ نام",
@@ -539,8 +579,8 @@ public sealed class Shell : IDisposable
     void Delete(Rule r)
     {
         if (MessageBox.Show(w, r.Target + "   ·   " + Mode(r.Mode) + "\nقانون «" + r.Name + "» حذف شود؟",
-                            "Netcontroll", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) !=
-            MessageBoxResult.Yes)
+                            "Netcontroll", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                            MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
         var n = data.Clone();
         Collection(n).RemoveAll(x => x.Id == r.Id);
@@ -575,8 +615,9 @@ public sealed class Shell : IDisposable
                                              "DirectServerRoutes", "Update-Routes.ps1")))
                 {
                     if (MessageBox.Show(w,
-                                        "مدیریت مسیرهای قبلی این لپ‌تاپ به فهرست فعلی منتقل شود؟ فقط IPهای " +
-                                        "فعال همین فهرست حفظ خواهند شد.",
+                                        "مدیریت مسیرهای قبلی این لپ‌تاپ به فهرست فعلی منتقل شود؟ فقط " +
+                                        "IPهای " +
+                                            "فعال همین فهرست حفظ خواهند شد.",
                                         "انتقال مدیریت مسیرها", MessageBoxButton.YesNo) != MessageBoxResult.Yes)
                         return;
                     takeover = true;
@@ -688,8 +729,9 @@ public sealed class Shell : IDisposable
             Process.Start("explorer.exe", "\"" + folder + "\"");
             MessageBox.Show(w,
                             "در chrome://extensions حالت Developer mode را روشن کنید. Load unpacked را بزنید و " +
-                            "پوشهٔ کپی‌شده را انتخاب کنید. سپس از دکمهٔ افزونه «اتصال این پروفایل» را بزنید. " +
-                            "برای بازگرداندن پراکسی قبلی همان دکمه را دوباره بزنید.",
+                                "پوشهٔ کپی‌شده را انتخاب کنید. سپس از دکمهٔ افزونه «اتصال این پروفایل» را " +
+                                "بزنید. " +
+                                "برای بازگرداندن پراکسی قبلی همان دکمه را دوباره بزنید.",
                             "اتصال پروفایل فعلی Chrome");
         }
         else
@@ -718,9 +760,11 @@ public sealed class Shell : IDisposable
         Copy("http://127.0.0.1:" + Router.DockerPort);
         MessageBox.Show(w,
                         "در Docker Desktop ← Settings ← Resources ← Proxies برای Containers proxy حالت Manual " +
-                        "را انتخاب کنید. نشانی کپی‌شده را در هر دو فیلد HTTP و HTTPS بگذارید و Apply را " +
-                        "بزنید. در نسخه‌هایی که Containers proxy از host پیروی می‌کند، همین نشانی را برای " +
-                        "Docker Desktop proxy هم وارد کنید. بعد از این مرحله مسیر را از همین صفحه عوض کنید.",
+                            "را انتخاب کنید. نشانی کپی‌شده را در هر دو فیلد HTTP و HTTPS بگذارید و Apply " +
+                            "را " +
+                            "بزنید. در نسخه‌هایی که Containers proxy از host پیروی می‌کند، همین نشانی را " +
+                            "برای " +
+                            "Docker Desktop proxy هم وارد کنید. بعد از این مرحله مسیر را از همین صفحه عوض کنید.",
                         "اتصال Docker Desktop");
     }
     async void DockerTest()
@@ -750,8 +794,9 @@ public sealed class Shell : IDisposable
                                        return p.ExitCode;
                                    }
                                });
-            bool seen = router.History.ToArray().Any(a => a.Time >= from && a.Source == "Docker" && a.Success &&
-                (a.Host == "registry-1.docker.io" || a.Host == "auth.docker.io"));
+            bool seen = router.History.ToArray().Any(
+                a => a.Time >= from && a.Source == "Docker" && a.Success &&
+                     (a.Host == "registry-1.docker.io" || a.Host == "auth.docker.io"));
             Tell(code == 0 && seen ? "دانلود موفق بود و اتصال پراکسی Docker مشاهده شد."
                  : code == 0       ? "دانلود شد. عبور از پراکسی در این آزمایش تأیید نشد."
                                    : "دانلود ناموفق بود. تنظیمات پراکسی و دسترسی رجیستری را بررسی کنید.");

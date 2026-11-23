@@ -1,6 +1,9 @@
 using System;
 using System.Diagnostics;
-using System.Drawing;
+using System.Threading.Tasks;
+using Wpf = System.Windows;
+using Controls = System.Windows.Controls;
+using Netcontroll.Design;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -66,9 +69,54 @@ static class Setup
             }
         }
     }
-    static void Install()
+    static Process InstalledProcess()
     {
-        CheckClosed();
+        int session = Process.GetCurrentProcess().SessionId;
+        foreach (var process in Process.GetProcessesByName("Netcontroll"))
+        {
+            try
+            {
+                if (process.SessionId == session && String.Equals(process.MainModule.FileName, ApplicationPath,
+                                                                  StringComparison.OrdinalIgnoreCase))
+                    return process;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+            }
+            process.Dispose();
+        }
+        return null;
+    }
+
+    static void StopForUpdate(bool allowed)
+    {
+        using (var process = InstalledProcess())
+        {
+            if (process == null)
+                return;
+            if (!allowed)
+                throw new InvalidOperationException("برنامه باز شده است. آن را ببندید و دوباره نصب را بزنید.");
+            EventWaitHandle signal;
+            if (EventWaitHandle.TryOpenExisting(@"Local\Netcontroll.ExitForUpdate.1", out signal))
+            {
+                using (signal) signal.Set();
+            }
+            else if (new Version(process.MainModule.FileVersionInfo.FileVersion) <= new Version(1, 0, 1, 0))
+            {
+                // These releases only hide on WM_CLOSE and have no update-exit signal.
+                process.Kill();
+            }
+            if (!process.WaitForExit(5000))
+                throw new InvalidOperationException(
+                    "ویرایش باز را تمام کنید و از منوی کنار ساعت از Netcontroll خارج شوید.");
+        }
+    }
+
+    static void Install(bool stopRunning)
+    {
         string parent = Path.GetDirectoryName(Root);
         Directory.CreateDirectory(parent);
         string stage = Path.Combine(parent, "Netcontroll.stage." + Guid.NewGuid().ToString("N")),
@@ -80,6 +128,8 @@ static class Setup
         {
             Extract(stage);
             File.Copy(Assembly.GetExecutingAssembly().Location, Path.Combine(stage, "Setup.exe"));
+            StopForUpdate(stopRunning);
+            CheckClosed();
             if (Directory.Exists(Root))
                 Directory.Move(Root, backup);
             Directory.Move(stage, Root);
@@ -132,7 +182,8 @@ static class Setup
     static void CreateShortcut(string path)
     {
         if (File.Exists(path) && !IsOurShortcut(path))
-            throw new IOException("یک میان‌بر هم‌نام با مقصد دیگری در این محل وجود دارد.");
+            throw new IOException("یک میان‌بر هم‌نام با مقصد دیگری در این محل وجود " +
+                                  "دارد.");
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
         dynamic link = shell.CreateShortcut(path);
@@ -185,83 +236,100 @@ static class Setup
     }
     static int ShowInstaller()
     {
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-        using (var form = new Form())
+        AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
+        var window = Theme.LoadWindow("installer.xaml");
+        Theme.Attach(window);
+        var heading = (Controls.TextBlock)window.FindName("Heading");
+        var intro = (Controls.TextBlock)window.FindName("Intro");
+        var status = (Controls.TextBlock)window.FindName("SetupStatus");
+        var location = (Controls.TextBox)window.FindName("InstallLocation");
+        var primary = (Controls.Button)window.FindName("PrimaryAction");
+        var close = (Controls.Button)window.FindName("CloseAction");
+        var desktop = (Controls.CheckBox)window.FindName("DesktopShortcut");
+        var art = (Wpf.FrameworkElement)window.FindName("RouteArt");
+        ((Controls.TextBlock)window.FindName("VersionLabel")).Text =
+            Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+        location.Text = Root;
+        bool updating = File.Exists(ApplicationPath);
+        bool stopRunning;
+        using (var process = InstalledProcess()) stopRunning = process != null;
+        if (updating)
         {
-            form.Text = "نصب Netcontroll";
-            form.StartPosition = FormStartPosition.CenterScreen;
-            form.FormBorderStyle = FormBorderStyle.FixedDialog;
-            form.MaximizeBox = false;
-            form.AutoScaleMode = AutoScaleMode.Dpi;
-            form.Font = new Font("Segoe UI", 10);
-            form.BackColor = Color.White;
-            form.ClientSize = new Size(500, 330);
-            form.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            var layout = new TableLayoutPanel {
-                Dock = DockStyle.Fill, Padding = new Padding(22, 16, 22, 15), ColumnCount = 1, RowCount = 6
-            };
-            foreach (int height in new[]{47, 40, 36, 41})
-                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-            form.Controls.Add(layout);
-            var title = new Label {Text = "نصب Netcontroll", Dock = DockStyle.Fill,
-                RightToLeft = RightToLeft.Yes, Font = new Font(form.Font.FontFamily, 19, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20,65,57)};
-            var description = new Label {Text = "برنامه برای حساب ویندوز شما در این پوشه نصب می‌شود.",
-                Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes, TextAlign = ContentAlignment.MiddleLeft};
-            var location = new TextBox {Text = Root, Dock = DockStyle.Fill, ReadOnly = true, Name = "InstallLocation"};
-            var desktop = new CheckBox {Text = "میان‌بر روی دسکتاپ بساز", Checked = true, Name = "DesktopShortcut",
-                Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes};
-            var status = new Label {Dock = DockStyle.Fill, RightToLeft = RightToLeft.Yes,
-                TextAlign = ContentAlignment.MiddleLeft, Name = "SetupStatus"};
-            var buttons = new FlowLayoutPanel {Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft};
-            var next = new Button {Text = "نصب برنامه", Name = "PrimaryAction", Size = new Size(145, 36),
-                BackColor = Color.FromArgb(20,99,77), ForeColor = Color.White, FlatStyle = FlatStyle.Flat};
-            var close = new Button {Text = "بستن", Size = new Size(85,36), DialogResult = DialogResult.Cancel};
-            layout.Controls.Add(title); layout.Controls.Add(description); layout.Controls.Add(location);
-            layout.Controls.Add(desktop); layout.Controls.Add(status); layout.Controls.Add(buttons);
-            buttons.Controls.Add(next); buttons.Controls.Add(close);
-            form.AcceptButton = next; form.CancelButton = close;
-            bool installed = false;
-            if (File.Exists(ApplicationPath))
-                next.Text = "نصب مجدد / به‌روزرسانی";
-            next.Click += (s,e) => {
-                if (installed)
-                {
-                    try { Process.Start(ApplicationPath); form.Close(); }
-                    catch (Exception ex) { status.Text = ex.GetBaseException().Message; }
-                    return;
-                }
-                next.Enabled = close.Enabled = desktop.Enabled = false;
-                form.UseWaitCursor = true;
+            heading.Text = window.Title = "به‌روزرسانی Netcontroll";
+            intro.Text = "نسخهٔ جدید جایگزین نسخهٔ قبلی می‌شود. قوانین و نام سرورها حفظ " +
+                         "می‌شوند.";
+            primary.Content = stopRunning ? "بستن برنامه و به‌روزرسانی"
+                                          : "به‌روزرسانی برنامه";
+            if (stopRunning)
+                status.Text = "Netcontroll باز است. پیش از ادامه، ویرایش‌های بازتان را ذخیره " +
+                              "کنید.";
+        }
+        window.SizeChanged += (s, e) => art.Visibility =
+            window.ActualWidth < 665 ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
+        bool installed = false, installing = false;
+        window.Closing += (s, e) =>
+        {
+            if (installing)
+                e.Cancel = true;
+        };
+        close.Click += (s, e) => window.Close();
+        primary.Click += async (s, e) =>
+        {
+            if (installed)
+            {
                 try
                 {
-                    status.Text = "در حال کپی فایل‌ها و ثبت در منوی Start…";
-                    form.Refresh();
-                    Install();
-                    installed = true;
-                    title.Text = "نصب انجام شد";
-                    next.Text = "باز کردن برنامه";
-                    status.Text = "Netcontroll از منوی Start قابل اجراست.";
-                    if (desktop.Checked)
-                    {
-                        try { CreateShortcut(DesktopShortcut); status.Text = "از دسکتاپ یا منوی Start می‌توانید برنامه را باز کنید."; }
-                        catch (Exception ex) { status.Text += " ساخت میان‌بر دسکتاپ انجام نشد. " + ex.GetBaseException().Message; }
-                    }
+                    Process.Start(ApplicationPath);
+                    window.Close();
                 }
                 catch (Exception ex)
                 {
-                    status.Text = "نصب تکمیل نشد. " + ex.GetBaseException().Message;
-                    desktop.Enabled = true;
+                    status.Text = ex.GetBaseException().Message;
                 }
-                finally { form.UseWaitCursor = false; next.Enabled = close.Enabled = true; }
-            };
-            form.Shown += (s,e) => { form.Activate(); next.Focus(); };
-            form.ShowDialog();
-            return 0;
-        }
+                return;
+            }
+            if (installing)
+                return;
+            installing = true;
+            primary.IsEnabled = close.IsEnabled = desktop.IsEnabled = false;
+            status.Text = "در حال نصب فایل‌های برنامه…";
+            try
+            {
+                await Task.Run(() => Install(stopRunning));
+                installed = true;
+                heading.Text = updating ? "به‌روزرسانی انجام شد" : "نصب انجام شد";
+                intro.Text = "Netcontroll آمادهٔ اجراست.";
+                primary.Content = "باز کردن برنامه";
+                status.Text = "برنامه در منوی Start در دسترس است.";
+                if (desktop.IsChecked == true)
+                {
+                    try
+                    {
+                        CreateShortcut(DesktopShortcut);
+                        status.Text = "میان‌بر برنامه روی دسکتاپ و در منوی Start آماده " +
+                                      "است.";
+                    }
+                    catch (Exception ex)
+                    {
+                        status.Text +=
+                            "  میان‌بر دسکتاپ ساخته نشد. " + ex.GetBaseException().Message;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                status.Text = "نصب تکمیل نشد. " + ex.GetBaseException().Message;
+                desktop.IsEnabled = true;
+            }
+            finally
+            {
+                installing = false;
+                primary.IsEnabled = close.IsEnabled = true;
+                primary.Focus();
+            }
+        };
+        window.ShowDialog();
+        return 0;
     }
     [STAThread]
     static int Main(string[] args)
@@ -278,8 +346,9 @@ static class Setup
             }
             if (args.Contains("--uninstall"))
             {
-                if (MessageBox.Show("Netcontroll و قوانین سیستمی آن حذف شوند؟ تنظیمات شخصی حفظ می‌شوند. ابتدا " +
-                                    "افزونهٔ Chrome را قطع و پراکسی Docker را به تنظیم قبلی برگردانید.",
+                if (MessageBox.Show("Netcontroll و قوانین سیستمی آن حذف شوند؟ تنظیمات شخصی حفظ می‌شوند. " +
+                                    "ابتدا " +
+                                        "افزونهٔ Chrome را قطع و پراکسی Docker را به تنظیم قبلی برگردانید.",
                                     "Netcontroll", MessageBoxButtons.YesNo) != DialogResult.Yes)
                     return 0;
                 string tmp = Path.Combine(Path.GetTempPath(),

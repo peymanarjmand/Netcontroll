@@ -62,7 +62,7 @@ try{
         $window.ShowInTaskbar=$false;$window.ShowActivated=$false;$window.WindowStartupLocation='Manual';$window.Left=-15000;$window.Top=0;$window.Show();$window.UpdateLayout()
         $window.Content.Background=$window.Background
         Check ($window.FindName('Nav').Children.Count -eq 5 -and $window.FindName('Rows').Children.Count -eq 2) 'WPF navigation and domain rows'
-        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap(1090,740,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap([int][Math]::Ceiling($window.Content.ActualWidth),[int][Math]::Ceiling($window.Content.ActualHeight),96,96,[Windows.Media.PixelFormats]::Pbgra32)
         $bitmap.Render($window.Content)
         $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder;$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
         $shot=[IO.File]::Create((Join-Path $area 'dashboard.png'));try{$encoder.Save($shot)}finally{$shot.Dispose()}

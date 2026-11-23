@@ -27,7 +27,6 @@ function ByName($window,$name){
 }
 
 if($InstallForCurrentUser){
-    if(Get-Process -Name Netcontroll -ErrorAction SilentlyContinue){throw 'Exit Netcontroll before testing an installation.'}
     $installer=Start-Process -FilePath $setup -PassThru
     $window=Wait-Until {
         $installer.Refresh()
@@ -36,12 +35,7 @@ if($InstallForCurrentUser){
             [Windows.Automation.AutomationElement]::FromHandle($installer.MainWindowHandle)
         }
     } 'Installer window did not appear.'
-    $primary=Wait-Until {
-        foreach($name in 'نصب برنامه','نصب مجدد / به‌روزرسانی'){
-            $button=ByName $window $name
-            if($button){return $button}
-        }
-    } 'Install button not found.'
+    $primary=Wait-Until {Control $window 'PrimaryAction'} 'Install button not found.'
     $edit=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
     $pathControl=$window.FindFirst([Windows.Automation.TreeScope]::Descendants,$edit)
     if($pathControl.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $root){throw 'Incorrect destination in installer.'}

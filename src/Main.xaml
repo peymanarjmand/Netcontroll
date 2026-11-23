@@ -1,22 +1,73 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Netcontroll" Width="1090" Height="740" MinWidth="920" MinHeight="620" WindowStartupLocation="CenterScreen" FontFamily="Segoe UI,Tahoma" Background="#F4F7F8" Language="fa-IR" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
-<Window.Resources>
- <SolidColorBrush x:Key="Ink" Color="#172F37"/><SolidColorBrush x:Key="Muted" Color="#526871"/>
- <Style TargetType="Button"><Setter Property="Cursor" Value="Hand"/><Setter Property="Padding" Value="15,8"/><Setter Property="Margin" Value="3"/><Setter Property="FontSize" Value="13"/><Setter Property="Background" Value="#E5EEEF"/><Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="surface" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="surface" Property="Opacity" Value=".80"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="surface" Property="Opacity" Value=".5"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
- <Style TargetType="TextBox"><Setter Property="Padding" Value="10,7"/><Setter Property="FontSize" Value="14"/><Setter Property="BorderBrush" Value="#AFBFC1"/><Setter Property="BorderThickness" Value="1"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
-</Window.Resources>
-<Grid Background="#F4F7F8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="205"/></Grid.ColumnDefinitions>
-<Border Grid.Column="1" Background="#112E35"><DockPanel Margin="16,25" LastChildFill="False">
-<StackPanel DockPanel.Dock="Top"><StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,42"><Viewbox Width="29" Height="29"><Canvas Width="32" Height="32"><Path Stroke="#69E4BE" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 4,26 L 4,6  L 26,26 L 26,6"/><Ellipse Canvas.Left="22" Canvas.Top="1" Width="8" Height="8" Fill="#69E4BE"/></Canvas></Viewbox><TextBlock Text="Netcontroll" Foreground="White" FontWeight="SemiBold" FontSize="22" Margin="9,0,0,0"/></StackPanel>
-<StackPanel x:Name="Nav" FlowDirection="RightToLeft"/></StackPanel>
-<StackPanel DockPanel.Dock="Bottom" FlowDirection="RightToLeft"><Border Height="1" Background="#34545B" Margin="0,0,0,12"/><TextBlock Text="توسعه‌دهنده" Foreground="#A4BABC" FontSize="12"/><TextBlock Text="peymanarjmand" Foreground="#E6F3F1" FontSize="14" Margin="0,3,0,0"/></StackPanel></DockPanel></Border>
-<Grid Margin="31,26" FlowDirection="RightToLeft"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<DockPanel><StackPanel><TextBlock x:Name="Title" FontSize="30" FontWeight="Bold" Foreground="{StaticResource Ink}"/><TextBlock x:Name="Subtitle" FontSize="14" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{StaticResource Muted}"/></StackPanel></DockPanel>
-<UniformGrid Grid.Row="1" Columns="2" Margin="0,23,0,13">
-<Border Background="#DBF1E9" CornerRadius="12" Padding="17,13" Margin="0,0,0,0"><StackPanel><TextBlock Text="اینترنت عادی" Foreground="#365F50" FontSize="12"/><TextBlock x:Name="Direct" Text="…" FontWeight="SemiBold" FontSize="16" Foreground="#163B30" TextTrimming="CharacterEllipsis"/></StackPanel></Border>
-<Border Background="#DEE9F7" CornerRadius="12" Padding="17,13" Margin="10,0,0,0"><StackPanel><TextBlock Text="مسیر VPN" Foreground="#416481" FontSize="12"/><TextBlock x:Name="Vpn" Text="…" FontWeight="SemiBold" FontSize="16" Foreground="#1B405F" TextTrimming="CharacterEllipsis"/></StackPanel></Border>
-</UniformGrid>
-<WrapPanel x:Name="Actions" Grid.Row="2" Margin="0,0,0,9"/>
-<Grid Grid.Row="3" Margin="0,0,0,9"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="جستجو" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="2,0,0,0"/><TextBox x:Name="Search" Grid.Column="1" Margin="9,0,0,0" MaxLength="256" AutomationProperties.Name="جستجو"/></Grid>
-<ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Rows"/></ScrollViewer>
-<TextBlock Grid.Row="5" x:Name="Status" TextWrapping="Wrap" Margin="2,10,2,0" FontSize="12" Foreground="#365967"/>
-</Grid></Grid></Window>
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Netcontroll" Width="1170" Height="795" MinWidth="520" MinHeight="390" WindowStartupLocation="CenterScreen"
+ FontFamily="Segoe UI Variable Text, Segoe UI, Tahoma" FontSize="14" Language="fa-IR" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+ <Grid Background="{DynamicResource Canvas}">
+  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+  <Border Grid.Column="1" x:Name="Sidebar" Width="206" Background="#181A26" BorderBrush="#303344" BorderThickness="1,0,0,0">
+   <DockPanel LastChildFill="True" Margin="12,22">
+    <StackPanel DockPanel.Dock="Top" HorizontalAlignment="Center" Margin="0,4,0,24">
+     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Style="{DynamicResource MarkTile}"><Path Data="{DynamicResource Logo}" Width="25" Height="25" Stretch="Uniform" Stroke="#B9A8FF" StrokeThickness="2.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" FlowDirection="LeftToRight"/></Border>
+      <TextBlock x:Name="BrandName" Text="Netcontroll" Foreground="#F1F1FB" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" Margin="9,0,0,0"/>
+     </StackPanel>
+    </StackPanel>
+    <StackPanel x:Name="Credit" DockPanel.Dock="Bottom" FlowDirection="RightToLeft" Margin="6,16,6,0">
+      <Border Height="1" Background="#323546" Margin="0,0,0,13"/>
+      <TextBlock Text="توسعه‌دهنده" Foreground="{DynamicResource Muted}" FontSize="12"/>
+      <TextBlock Text="peymanarjmand" Foreground="{DynamicResource Ink}" FontSize="14" Margin="0,3,0,0"/>
+    </StackPanel>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel x:Name="Nav" FlowDirection="RightToLeft"/></ScrollViewer>
+   </DockPanel>
+  </Border>
+  <Grid x:Name="Body" Margin="27,22" FlowDirection="RightToLeft">
+   <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+    <StackPanel Margin="3,0,3,0">
+     <TextBlock x:Name="Title" FontSize="34" FontWeight="Bold" Foreground="{DynamicResource Ink}"/>
+     <TextBlock x:Name="Subtitle" FontSize="15" Margin="0,3,0,14" TextWrapping="Wrap" Foreground="{DynamicResource Muted}"/>
+     <UniformGrid Columns="2" Margin="-3,0,-3,10">
+      <Border CornerRadius="14" BorderBrush="#34534E" BorderThickness="1" Padding="18,14" Margin="3">
+ <Border.Background><LinearGradientBrush StartPoint="1,0" EndPoint="0,1"><GradientStop Color="#1D3434" Offset="0"/><GradientStop Color="#1A1D2A" Offset="1"/></LinearGradientBrush></Border.Background>
+ <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+ <Border Width="44" Height="44" Background="#1D3434" BorderBrush="#34534E" BorderThickness="1" CornerRadius="12" VerticalAlignment="Center">
+ <TextBlock Text="&#xE839;" FontFamily="Segoe MDL2 Assets" FontSize="21" Foreground="#8DE6C9" VerticalAlignment="Center" HorizontalAlignment="Center"/></Border>
+ <StackPanel Grid.Column="1" Margin="12,0,12,0"><TextBlock Text="اینترنت عادی" Foreground="#8DE6C9" FontSize="13" FontWeight="SemiBold"/>
+ <TextBlock x:Name="Direct" FlowDirection="LeftToRight" TextAlignment="Right" FontSize="16" Foreground="#F3F3FC" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/></StackPanel>
+ </Grid></Border>
+      <Border CornerRadius="14" BorderBrush="#514562" BorderThickness="1" Padding="18,14" Margin="3">
+ <Border.Background><LinearGradientBrush StartPoint="1,0" EndPoint="0,1"><GradientStop Color="#302A44" Offset="0"/><GradientStop Color="#1A1D2A" Offset="1"/></LinearGradientBrush></Border.Background>
+ <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+ <Border Width="44" Height="44" Background="#302A44" BorderBrush="#514562" BorderThickness="1" CornerRadius="12" VerticalAlignment="Center">
+ <TextBlock Text="&#xEA18;" FontFamily="Segoe MDL2 Assets" FontSize="21" Foreground="#D1BDFF" VerticalAlignment="Center" HorizontalAlignment="Center"/></Border>
+ <StackPanel Grid.Column="1" Margin="12,0,12,0"><TextBlock Text="مسیر VPN" Foreground="#D1BDFF" FontSize="13" FontWeight="SemiBold"/>
+ <TextBlock x:Name="Vpn" FlowDirection="LeftToRight" TextAlignment="Right" FontSize="16" Foreground="#F3F3FC" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/></StackPanel>
+ </Grid></Border>
+     </UniformGrid>
+     <WrapPanel x:Name="Actions" Margin="-3,0,-3,10"/>
+     <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <TextBlock Text="جستجو" VerticalAlignment="Center" Foreground="{DynamicResource Muted}" Margin="0,0,12,0"/>
+      <TextBox x:Name="Search" Grid.Column="1" MaxLength="256" AutomationProperties.Name="جستجو"/>
+     </Grid>
+     <StackPanel x:Name="Rows"/>
+     <Border x:Name="EmptyPanel" Visibility="Collapsed" BorderBrush="#36394E" BorderThickness="1" CornerRadius="16" Padding="22,30">
+      <Border.Background><LinearGradientBrush StartPoint="0,1" EndPoint="1,0"><GradientStop Color="#191C27" Offset="0"/><GradientStop Color="#232232" Offset="1"/></LinearGradientBrush></Border.Background>
+      <StackPanel HorizontalAlignment="Center">
+       <Grid Width="116" Height="65" HorizontalAlignment="Center" IsHitTestVisible="False" FlowDirection="LeftToRight">
+        <Path Data="M5,46 L21,46 L37,30 L53,30 M64,30 L83,30 L96,17 L110,17" Stroke="#7764AE" StrokeThickness="2"/>
+        <Ellipse Width="7" Height="7" Fill="#B9A8FF" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,43,0,0"/>
+        <Ellipse Width="7" Height="7" Fill="#8DE6C9" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,2,0"/>
+        <Border Width="47" Height="47" Background="#302B46" BorderBrush="#61567C" BorderThickness="1" CornerRadius="14">
+         <TextBlock x:Name="EmptyIcon" FontFamily="Segoe MDL2 Assets" FontSize="22" Foreground="#CCBDFA" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+       </Grid>
+       <TextBlock x:Name="EmptyTitle" TextAlignment="Center" TextWrapping="Wrap" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/>
+       <TextBlock x:Name="EmptyDetail" Foreground="{DynamicResource Muted}" TextAlignment="Center" TextWrapping="Wrap" FontSize="14" Margin="0,6,0,0"/>
+      </StackPanel>
+     </Border>
+    </StackPanel>
+   </ScrollViewer>
+   <Border Grid.Row="1" BorderBrush="#303344" BorderThickness="0,1,0,0" Margin="3,9,3,0" Padding="0,8,0,0">
+    <TextBlock x:Name="Status" TextWrapping="Wrap" FontSize="13" Foreground="{DynamicResource Muted}"/>
+   </Border>
+  </Grid>
+ </Grid>
+</Window>
