@@ -66,5 +66,5 @@ $app=Wait-Until {
     } | Select-Object -First 1
 } 'Installed application did not open.'
 $main=[Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
-if(!(Control $main 'Nav.ips')){throw 'Expected main navigation missing.'}
+[void](Wait-Until {Control $main 'Nav.ips'} 'Expected main navigation missing.')
 Write-Host ('PASS installed files, version '+$key.DisplayVersion+', both shortcuts and main application window.')

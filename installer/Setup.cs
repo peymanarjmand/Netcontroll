@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Wpf = System.Windows;
@@ -29,29 +30,16 @@ static class Setup
         @"chrome\popup.js", @"chrome\worker.js", @"system\Routes.ps1",    @"system\SavedRoutes.ps1",
         "README.md"
     };
-    static void CheckClosed()
+    static void EnterDesktopMutex(Mutex mutex)
     {
-        using (var m = new Mutex(false, @"Local\Netcontroll.Desktop.1"))
+        try
         {
-            bool own = false;
-            try
-            {
-                try
-                {
-                    own = m.WaitOne(0);
-                }
-                catch (AbandonedMutexException)
-                {
-                    own = true;
-                }
-                if (!own)
-                    throw new InvalidOperationException("ابتدا Netcontroll را از منوی کنار ساعت ویندوز ببندید.");
-            }
-            finally
-            {
-                if (own)
-                    m.ReleaseMutex();
-            }
+            if (!mutex.WaitOne(0))
+                throw new InvalidOperationException("ابتدا Netcontroll را از منوی کنار ساعت ویندوز ببندید.");
+        }
+        catch (AbandonedMutexException)
+        {
+            // WaitOne grants ownership when the previous process exited unexpectedly.
         }
     }
     static void Extract(string dir)
@@ -121,52 +109,88 @@ static class Setup
         Directory.CreateDirectory(parent);
         string stage = Path.Combine(parent, "Netcontroll.stage." + Guid.NewGuid().ToString("N")),
                backup = stage + ".previous";
-        if (Directory.Exists(Root) && !File.Exists(Path.Combine(Root, "Setup.exe")))
-            throw new IOException("پوشهٔ نصب در اختیار برنامهٔ دیگری است.");
-        bool movedNewFiles = false;
         try
         {
             Extract(stage);
             File.Copy(Assembly.GetExecutingAssembly().Location, Path.Combine(stage, "Setup.exe"));
             StopForUpdate(stopRunning);
-            CheckClosed();
-            if (Directory.Exists(Root))
-                Directory.Move(Root, backup);
-            Directory.Move(stage, Root);
-            movedNewFiles = true;
-            CreateShortcut(Shortcut);
-            using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
+            using (var mutex = new Mutex(false, @"Local\Netcontroll.Desktop.1"))
             {
-                key.SetValue("DisplayName", "Netcontroll");
-                key.SetValue("Publisher", "peymanarjmand");
-                key.SetValue("DisplayVersion", Application.ProductVersion);
-                key.SetValue("InstallLocation", Root);
-                key.SetValue("DisplayIcon", Path.Combine(Root, "Netcontroll.exe"));
-                key.SetValue("UninstallString", "\"" + Path.Combine(Root, "Setup.exe") + "\" --uninstall");
+                EnterDesktopMutex(mutex);
+                try
+                {
+                    bool updating = Directory.Exists(Root);
+                    if (updating && !File.Exists(Path.Combine(Root, "Setup.exe")))
+                        throw new IOException("پوشهٔ نصب در اختیار برنامهٔ دیگری است.");
+                    var replaced = new Stack<string>();
+                    try
+                    {
+                        ReplacePayload(stage, Root, backup, replaced);
+                        CreateShortcut(Shortcut);
+                        using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
+                        {
+                            key.SetValue("DisplayName", "Netcontroll");
+                            key.SetValue("Publisher", "peymanarjmand");
+                            key.SetValue("InstallLocation", Root);
+                            key.SetValue("DisplayIcon", ApplicationPath);
+                            key.SetValue("UninstallString", "\"" + Path.Combine(Root, "Setup.exe") + "\" --uninstall");
+                            key.SetValue("DisplayVersion", Application.ProductVersion);
+                        }
+                    }
+                    catch
+                    {
+                        RestorePayload(Root, backup, replaced);
+                        if (!updating)
+                        {
+                            Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
+                            if (IsOurShortcut(Shortcut))
+                                File.Delete(Shortcut);
+                            RemovePayload(Root);
+                        }
+                        throw;
+                    }
+                }
+                finally
+                {
+                    mutex.ReleaseMutex();
+                }
             }
-        }
-        catch
-        {
-            if (Directory.Exists(backup))
-            {
-                if (Directory.Exists(Root))
-                    RemovePayload(Root);
-                if (!Directory.Exists(Root))
-                    Directory.Move(backup, Root);
-            }
-            else if (movedNewFiles)
-            {
-                Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
-                if (IsOurShortcut(Shortcut))
-                    File.Delete(Shortcut);
-                RemovePayload(Root);
-            }
-            throw;
         }
         finally
         {
             if (Directory.Exists(stage))
                 RemovePayload(stage);
+        }
+        if (Directory.Exists(backup))
+            RemovePayload(backup);
+    }
+    static void ReplacePayload(string stage, string root, string backup, Stack<string> replaced)
+    {
+        // An open browser can hold the extension directory. Keep directory handles valid.
+        foreach (string name in Files.Concat(new[] { "Setup.exe" }))
+        {
+            string target = Path.Combine(root, name), source = Path.Combine(stage, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            if (File.Exists(target))
+            {
+                string previous = Path.Combine(backup, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(previous));
+                File.Replace(source, target, previous);
+            }
+            else
+                File.Move(source, target);
+            replaced.Push(name);
+        }
+    }
+    static void RestorePayload(string root, string backup, Stack<string> replaced)
+    {
+        foreach (string name in replaced)
+        {
+            string previous = Path.Combine(backup, name), target = Path.Combine(root, name);
+            if (File.Exists(previous))
+                File.Replace(previous, target, null);
+            else
+                File.Delete(target);
         }
         if (Directory.Exists(backup))
             RemovePayload(backup);
@@ -211,7 +235,11 @@ static class Setup
     }
     static void Uninstall()
     {
-        CheckClosed();
+        using (var mutex = new Mutex(false, @"Local\Netcontroll.Desktop.1"))
+        {
+            EnterDesktopMutex(mutex);
+            mutex.ReleaseMutex();
+        }
         string rules = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
                                     @"Netcontroll Routes\Routes.ps1");
         if (File.Exists(rules))
