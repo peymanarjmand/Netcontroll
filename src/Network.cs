@@ -127,6 +127,7 @@ public static class Network
         var link = Choose(mode);
         var addresses = await Dns.GetHostAddressesAsync(host).ConfigureAwait(false);
         Exception last = null;
+        IPAddress destination = null;
         foreach (var addr in addresses.Where(a => link == null || a.AddressFamily == AddressFamily.InterNetwork))
         {
             var client = new TcpClient(addr.AddressFamily);
@@ -148,10 +149,16 @@ public static class Network
             catch (Exception ex)
             {
                 last = ex;
+                destination = addr;
                 client.Close();
             }
         }
-        throw new InvalidOperationException("اتصال از مسیر انتخابی برقرار نشد.", last);
+        if (destination == null)
+            throw new InvalidOperationException("DNS برای این میزبان آدرس سازگار با مسیر انتخابی برنگرداند.");
+        string source = link == null ? "مسیر سیستم" : link.Name + " (" + link.Source + ")";
+        string reason = last is TimeoutException ? "پاسخ شروع اتصال TCP در ۶ ثانیه نرسید."
+                                                 : last.GetBaseException().Message;
+        throw new InvalidOperationException(source + " → " + new IPEndPoint(destination, port) + "   ·   " + reason, last);
     }
 }
 }

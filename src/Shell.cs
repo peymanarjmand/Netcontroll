@@ -79,6 +79,8 @@ public sealed class Shell : IDisposable
         timer.Tick += (s, e) =>
         {
             Links();
+            if (page == "chrome")
+                UpdateChromeStatus();
             if (page == "activity")
                 RenderRows();
         };
@@ -114,6 +116,15 @@ public sealed class Shell : IDisposable
             label.Text = text;
             label.ToolTip = text;
         }
+    }
+    void UpdateChromeStatus()
+    {
+        int count = router.ConfirmedChromeProfiles;
+        var status = C<TextBlock>("ChromeStatus");
+        status.Text = count == 0
+            ? "هنوز هیچ پروفایل معمولی Chrome قوانین فعلی را تأیید نکرده است."
+            : "قوانین فعلی را افزونه در " + count + " پروفایل Chrome اخیراً تأیید کرده است.";
+        status.Foreground = B(count == 0 ? "#EAC689" : "#8DE6C9");
     }
     void BuildNav()
     {
@@ -180,6 +191,7 @@ public sealed class Shell : IDisposable
         C<TextBlock>("Subtitle").Text = descriptions[index];
         Links();
         var bar = C<WrapPanel>("Actions");
+        C<TextBlock>("ChromeStatus").Visibility = page == "chrome" ? Visibility.Visible : Visibility.Collapsed;
         bar.Children.Clear();
         if (page == "chrome" || page == "ips" || page == "apps")
             bar.Children.Add(Button(page == "ips"      ? "＋  افزودن سرور"
@@ -188,8 +200,9 @@ public sealed class Shell : IDisposable
                                     () => Edit(null), true));
         if (page == "chrome")
         {
+            UpdateChromeStatus();
+            bar.Children.Add(Button("راه‌اندازی در Chrome فعلی", () => LaunchChrome(true)));
             bar.Children.Add(Button("باز کردن Chrome مدیریت‌شده", () => LaunchChrome(false)));
-            bar.Children.Add(Button("اتصال Chrome فعلی", () => LaunchChrome(true)));
         }
         if (page == "ips")
         {
@@ -637,7 +650,8 @@ public sealed class Shell : IDisposable
             }
             data = next;
             Render();
-            Tell("تغییرات ذخیره و اعمال شد.");
+            Tell(page == "chrome" ? "قانون ذخیره شد. وضعیت دریافت قوانین در Chrome بالای فهرست نمایش داده می‌شود."
+                                  : "تغییرات ذخیره و اعمال شد.");
         }
         catch (Exception ex)
         {
@@ -726,12 +740,11 @@ public sealed class Shell : IDisposable
             string folder = Path.Combine(Entry.Base, "chrome");
             Copy(folder);
             Process.Start(exe, "chrome://extensions");
-            Process.Start("explorer.exe", "\"" + folder + "\"");
             MessageBox.Show(w,
-                            "در chrome://extensions حالت Developer mode را روشن کنید. Load unpacked را بزنید و " +
-                                "پوشهٔ کپی‌شده را انتخاب کنید. سپس از دکمهٔ افزونه «اتصال این پروفایل» را " +
-                                "بزنید. " +
-                                "برای بازگرداندن پراکسی قبلی همان دکمه را دوباره بزنید.",
+                            "در همان پروفایلی که سایت را باز می‌کنید، صفحهٔ chrome://extensions را باز کنید.\n\n" +
+                            "۱. برای نصب اولیه، Developer mode را روشن کنید. Load unpacked را بزنید و مسیر کپی‌شده را وارد کنید.\n" +
+                            "۲. اگر افزونه از قبل نصب است، پس از به‌روزرسانی برنامه روی Reload در کارت Netcontroll بزنید.\n" +
+                            "۳. در افزونه «اتصال این پروفایل» را بزنید. بعد از تأیید قوانین، تب سایت را دوباره بارگذاری کنید.",
                             "اتصال پروفایل فعلی Chrome");
         }
         else

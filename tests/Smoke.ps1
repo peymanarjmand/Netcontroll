@@ -40,17 +40,26 @@ if((Test-Path -LiteralPath $legacyPath) -and !(Test-Path -LiteralPath (Join-Path
     Check ($expected.Count -gt 0 -and @($expected|Where-Object {$_ -notin $known.IP}).Count -eq 0) "auto-discovery of all $($expected.Count) legacy rules"
     Check (@($known|Where-Object {$_.Exact -and $_.Adapter}).Count -eq $expected.Count) 'discovered rules show live Windows host routes'
 }
-$router=New-Object Netcontroll.Router
+$chromeTestPort=27831
+$dockerTestPort=27832
+$router=[Netcontroll.Router]::new($chromeTestPort,$dockerTestPort)
 try{
     $router.Configure($s)
-    $endpoint='http://127.0.0.1:17831/chrome-rules/'
+    $endpoint="http://127.0.0.1:$chromeTestPort/chrome-rules/"
     $client=New-Object Net.WebClient
     try{
         $client.Proxy=$null;$client.Headers.Add('X-Netcontroll-Client','chrome-v1')
         $policy=$client.DownloadString($endpoint)|ConvertFrom-Json
         Check ($policy.rules.Count -eq 1 -and $policy.rules[0].host -eq 'example.net') 'existing Chrome profile receives only active domain rules'
+        Check ($router.ConfirmedChromeProfiles -eq 0) 'fetching rules is not a profile acknowledgement'
+        $client.Headers.Add('X-Netcontroll-Profile',[guid]::NewGuid().ToString())
+        $client.Headers.Add('X-Netcontroll-Applied',$policy.revision)
         $watch=$client.DownloadStringTaskAsync($endpoint+$policy.revision)
+        $until=[datetime]::UtcNow.AddSeconds(3)
+        while ($router.ConfirmedChromeProfiles -eq 0 -and [datetime]::UtcNow -lt $until) {Start-Sleep -Milliseconds 20}
+        Check ($router.ConfirmedChromeProfiles -eq 1) 'effective revision acknowledged by profile'
         $parent.Mode='System';$router.Configure($s)
+        Check ($router.ConfirmedChromeProfiles -eq 0) 'changed rules require a fresh acknowledgement'
         Check ($watch.Wait(4000) -and !(($watch.Result|ConvertFrom-Json).rules[0].route)) 'live extension rule notification'
         $parent.Mode='Direct';$router.Configure($s)
     }finally{$client.Dispose()}
@@ -75,7 +84,7 @@ try{
             $link=[Netcontroll.Network]::Choose($mode);$rule.Mode=$mode;$router.Configure($s)
             $profile=Join-Path $area ('chrome-'+$mode)
             $html=Join-Path $area ($mode+'.html')
-            $argsList='--headless --disable-quic --disable-background-networking --no-first-run --no-default-browser-check --proxy-server="http://127.0.0.1:17831" --user-data-dir="'+$profile+'" --dump-dom https://'+$hostName+'/?format=json'
+            $argsList='--headless --disable-quic --disable-background-networking --no-first-run --no-default-browser-check --proxy-server="http://127.0.0.1:'+$chromeTestPort+'" --user-data-dir="'+$profile+'" --dump-dom https://'+$hostName+'/?format=json'
             $started=Get-Date
             $proc=Start-Process -FilePath $chrome -ArgumentList $argsList -RedirectStandardOutput $html -RedirectStandardError (Join-Path $area ($mode+'.err')) -WindowStyle Hidden -PassThru
             if(!$proc.WaitForExit(35000)){Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue;throw "Chrome $mode timed out"}
@@ -94,7 +103,7 @@ try{
         Check ($s.Match($hostName) -eq 'System') 'remove rule restores default'
     }
     if($Container){
-        $javascript="const n=require('net');const s=n.connect(17832,'host.docker.internal',()=>s.write('CONNECT one.one.one.one:443 HTTP/1.1\r\nHost: one.one.one.one:443\r\n\r\n'));s.setTimeout(10000,()=>process.exit(2));s.once('data',b=>{console.log(b.toString().split('\r\n')[0]);process.exit(b.toString().includes('200 Connection Established')?0:3)});s.on('error',()=>process.exit(4))"
+        $javascript="const n=require('net');const s=n.connect($dockerTestPort,'host.docker.internal',()=>s.write('CONNECT one.one.one.one:443 HTTP/1.1\r\nHost: one.one.one.one:443\r\n\r\n'));s.setTimeout(10000,()=>process.exit(2));s.once('data',b=>{console.log(b.toString().split('\r\n')[0]);process.exit(b.toString().includes('200 Connection Established')?0:3)});s.on('error',()=>process.exit(4))"
         foreach($mode in 'Direct','Vpn'){
             $s.Docker=$mode;$router.Configure($s)
             $javascript | & docker run --rm -i --pull never node:24.16.0-bookworm-slim node

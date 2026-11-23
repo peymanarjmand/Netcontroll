@@ -21,6 +21,13 @@ public sealed class Activity
 public sealed class Router : IDisposable
 {
     public const int ChromePort = 17831, DockerPort = 17832;
+    readonly int chromePort, dockerPort;
+    public Router() : this(ChromePort, DockerPort) {}
+    public Router(int chromePort, int dockerPort)
+    {
+        this.chromePort = chromePort;
+        this.dockerPort = dockerPort;
+    }
     readonly object gate = new object();
     readonly Dictionary<int, TcpListener> listeners = new Dictionary<int, TcpListener>();
     readonly HashSet<Session> sessions = new HashSet<Session>();
@@ -28,6 +35,14 @@ public sealed class Router : IDisposable
     public readonly ConcurrentQueue<Activity> History = new ConcurrentQueue<Activity>();
     Settings settings = new Settings();
     string policyRevision = Guid.NewGuid().ToString("N");
+    readonly Dictionary<Guid, DateTime> confirmedProfiles = new Dictionary<Guid, DateTime>();
+    public int ConfirmedChromeProfiles
+    {
+        get
+        {
+            lock (gate) return confirmedProfiles.Values.Count(until => until > DateTime.UtcNow);
+        }
+    }
     TaskCompletionSource<bool> policyChanged =
         new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
     class Session
@@ -39,7 +54,7 @@ public sealed class Router : IDisposable
     }
     public void Configure(Settings next)
     {
-        var ports = new HashSet<int> { ChromePort, DockerPort };
+        var ports = new HashSet<int> { chromePort, dockerPort };
         foreach (var app in next.Apps.Where(r => r.Enabled))
         {
             if (app.Port < 17900 || app.Port > 17999 || !ports.Add(app.Port))
@@ -73,6 +88,7 @@ public sealed class Router : IDisposable
             {
                 var previous = policyChanged;
                 policyRevision = Guid.NewGuid().ToString("N");
+                confirmedProfiles.Clear();
                 policyChanged = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 previous.TrySetResult(true);
             }
@@ -93,9 +109,9 @@ public sealed class Router : IDisposable
     }
     PathMode Resolve(int p, string h)
     {
-        if (p == ChromePort)
+        if (p == chromePort)
             return settings.Match(h);
-        if (p == DockerPort)
+        if (p == dockerPort)
             return settings.Docker;
         return settings.Apps.Single(x => x.Enabled && x.Port == p).Mode;
     }
@@ -150,8 +166,8 @@ public sealed class Router : IDisposable
     {
         string name;
         lock (gate) name =
-            s.Port == ChromePort ? "Chrome"
-            : s.Port == DockerPort
+            s.Port == chromePort ? "Chrome"
+            : s.Port == dockerPort
                 ? "Docker"
                 : settings.Apps.Where(a => a.Port == s.Port).Select(a => a.Name).FirstOrDefault() ?? "App";
         History.Enqueue(new Activity { Time = DateTime.Now, Source = name, Host = s.Host, Mode = s.Mode,
@@ -178,11 +194,11 @@ public sealed class Router : IDisposable
             var request = lines[0].Split(' ');
             if (request.Length != 3 || (request[2] != "HTTP/1.1" && request[2] != "HTTP/1.0"))
                 throw new InvalidDataException();
-            if (s.Port == ChromePort && request[0] == "GET" &&
+            if (s.Port == chromePort && request[0] == "GET" &&
                 request[1].StartsWith("/chrome-rules/", StringComparison.Ordinal))
             {
                 if (!lines.Any(
-                        h => h.Equals("Host: 127.0.0.1:" + ChromePort, StringComparison.OrdinalIgnoreCase)) ||
+                        h => h.Equals("Host: 127.0.0.1:" + chromePort, StringComparison.OrdinalIgnoreCase)) ||
                     !lines.Any(
                         h => h.Equals("X-Netcontroll-Client: chrome-v1", StringComparison.OrdinalIgnoreCase)) ||
                     lines.Any(
@@ -191,7 +207,23 @@ public sealed class Router : IDisposable
                     throw new InvalidDataException();
                 string revision = request[1].Substring("/chrome-rules/".Length);
                 Task change;
-                lock (gate) change = revision == policyRevision ? policyChanged.Task : Task.CompletedTask;
+                lock (gate)
+                {
+                    const string profileHeader = "X-Netcontroll-Profile:";
+                    string profileLine = lines.FirstOrDefault(h => h.StartsWith(profileHeader, StringComparison.OrdinalIgnoreCase));
+                    Guid profile;
+                    if (profileLine != null && Guid.TryParseExact(profileLine.Substring(profileHeader.Length).Trim(), "D", out profile))
+                    {
+                        DateTime now = DateTime.UtcNow;
+                        foreach (var old in confirmedProfiles.Where(p => p.Value <= now).Select(p => p.Key).ToArray())
+                            confirmedProfiles.Remove(old);
+                        if (revision == policyRevision && lines.Any(h => h.Equals("X-Netcontroll-Applied: " + revision, StringComparison.OrdinalIgnoreCase)))
+                            confirmedProfiles[profile] = now.AddSeconds(50);
+                        else
+                            confirmedProfiles.Remove(profile);
+                    }
+                    change = revision == policyRevision ? policyChanged.Task : Task.CompletedTask;
+                }
                 await Task.WhenAny(change, Task.Delay(18000)).ConfigureAwait(false);
                 string json;
                 lock (gate) json =
@@ -273,7 +305,7 @@ public sealed class Router : IDisposable
         catch (Exception e)
         {
             if (!sent && s.Host != null)
-                Record(s, "", false, e.GetBaseException().Message);
+                Record(s, "", false, e.Message);
             if (!sent)
                 try
                 {

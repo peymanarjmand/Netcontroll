@@ -43,6 +43,7 @@
  </Grid></Border>
      </UniformGrid>
      <WrapPanel x:Name="Actions" Margin="-3,0,-3,10"/>
+     <TextBlock x:Name="ChromeStatus" TextWrapping="Wrap" Margin="0,0,0,12" FontSize="14" Foreground="{DynamicResource Muted}"/>
      <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
       <TextBlock Text="جستجو" VerticalAlignment="Center" Foreground="{DynamicResource Muted}" Margin="0,0,12,0"/>
       <TextBox x:Name="Search" Grid.Column="1" MaxLength="256" AutomationProperties.Name="جستجو"/>
