@@ -1,8 +1,10 @@
 {
-  "manifest_version": 3, "name": "Netcontroll · مسیر دامنه‌ها", "version": "1.1.1",
-  "description": "Connect this Chrome profile to your local Netcontroll routing rules.",
-  "permissions": ["proxy", "storage", "alarms"],
+  "manifest_version": 3,
+  "name": "Netcontroll · کنترل مسیر شبکه",
+  "version": "2.0.0",
+  "description": "Choose Direct or VPN for the current site using your local Netcontroll app. Rules apply by hostname across this profile.",
+  "permissions": ["proxy", "storage", "alarms", "activeTab"],
   "host_permissions": ["http://127.0.0.1/*"],
   "background": {"service_worker": "worker.js"},
-  "action": {"default_popup": "popup.html", "default_title": "Netcontroll"}
+  "action": {"default_popup": "popup.html", "default_title": "Netcontroll · مسیر این سایت"}
 }

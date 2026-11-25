@@ -20,14 +20,26 @@ public sealed class Activity
 }
 public sealed class Router : IDisposable
 {
-    public const int ChromePort = 17831, DockerPort = 17832;
-    readonly int chromePort, dockerPort;
-    public Router() : this(ChromePort, DockerPort) {}
+    public const int ChromePort = 17831, DockerPort = 17832, CodexPort = 17833,
+                     ChromeVpnPort = 17834, ChromeDirectPort = 17835;
+    readonly int chromePort, dockerPort, codexPort, chromeVpnPort, chromeDirectPort;
+    public Router() : this(ChromePort, DockerPort, CodexPort, ChromeVpnPort, ChromeDirectPort) {}
     public Router(int chromePort, int dockerPort)
+        : this(chromePort, dockerPort, dockerPort + 1, dockerPort + 2, dockerPort + 3) {}
+    public Router(int chromePort, int dockerPort, int codexPort, int chromeVpnPort, int chromeDirectPort)
     {
+        var ports = new[] { chromePort, dockerPort, codexPort, chromeVpnPort, chromeDirectPort };
+        if (ports.Any(p => p < 1024 || p > 65535) || ports.Distinct().Count() != ports.Length)
+            throw new ArgumentException("پورت‌های سرویس محلی معتبر نیستند.");
         this.chromePort = chromePort;
         this.dockerPort = dockerPort;
+        this.codexPort = codexPort;
+        this.chromeVpnPort = chromeVpnPort;
+        this.chromeDirectPort = chromeDirectPort;
     }
+    // The desktop owns settings and persists mutations on its Dispatcher. The router never
+    // writes an out-of-date settings snapshot from a network thread.
+    public Func<ChromeRuleChange, Task<bool>> ChromeRuleRequested { get; set; }
     readonly object gate = new object();
     readonly Dictionary<int, TcpListener> listeners = new Dictionary<int, TcpListener>();
     readonly HashSet<Session> sessions = new HashSet<Session>();
@@ -35,6 +47,7 @@ public sealed class Router : IDisposable
     public readonly ConcurrentQueue<Activity> History = new ConcurrentQueue<Activity>();
     Settings settings = new Settings();
     string policyRevision = Guid.NewGuid().ToString("N");
+    readonly string mutationToken = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
     readonly Dictionary<Guid, DateTime> confirmedProfiles = new Dictionary<Guid, DateTime>();
     public int ConfirmedChromeProfiles
     {
@@ -54,7 +67,10 @@ public sealed class Router : IDisposable
     }
     public void Configure(Settings next)
     {
-        var ports = new HashSet<int> { chromePort, dockerPort };
+        if (next == null)
+            throw new ArgumentNullException("next");
+        next.Validate();
+        var ports = new HashSet<int> { chromePort, dockerPort, codexPort, chromeVpnPort, chromeDirectPort };
         foreach (var app in next.Apps.Where(r => r.Enabled))
         {
             if (app.Port < 17900 || app.Port > 17999 || !ports.Add(app.Port))
@@ -84,7 +100,8 @@ public sealed class Router : IDisposable
                 }
                 throw;
             }
-            if (Settings.Text(settings.Domains) != Settings.Text(next.Domains))
+            if (settings.ChromeDefault != next.ChromeDefault ||
+                Settings.Text(settings.Domains) != Settings.Text(next.Domains))
             {
                 var previous = policyChanged;
                 policyRevision = Guid.NewGuid().ToString("N");
@@ -113,6 +130,12 @@ public sealed class Router : IDisposable
             return settings.Match(h);
         if (p == dockerPort)
             return settings.Docker;
+        if (p == codexPort)
+            return settings.Codex;
+        if (p == chromeVpnPort)
+            return PathMode.Vpn;
+        if (p == chromeDirectPort)
+            return PathMode.Direct;
         return settings.Apps.Single(x => x.Enabled && x.Port == p).Mode;
     }
     async void Accept(TcpListener l, int port)
@@ -167,6 +190,9 @@ public sealed class Router : IDisposable
         string name;
         lock (gate) name =
             s.Port == chromePort ? "Chrome"
+            : s.Port == chromeVpnPort ? "Chrome · VPN"
+            : s.Port == chromeDirectPort ? "Chrome · Direct"
+            : s.Port == codexPort ? "Codex"
             : s.Port == dockerPort
                 ? "Docker"
                 : settings.Apps.Where(a => a.Port == s.Port).Select(a => a.Name).FirstOrDefault() ?? "App";
@@ -194,17 +220,23 @@ public sealed class Router : IDisposable
             var request = lines[0].Split(' ');
             if (request.Length != 3 || (request[2] != "HTTP/1.1" && request[2] != "HTTP/1.0"))
                 throw new InvalidDataException();
-            if (s.Port == chromePort && request[0] == "GET" &&
-                request[1].StartsWith("/chrome-rules/", StringComparison.Ordinal))
+            if (s.Port == chromePort && request[1].StartsWith("/chrome-", StringComparison.Ordinal))
             {
-                if (!lines.Any(
-                        h => h.Equals("Host: 127.0.0.1:" + chromePort, StringComparison.OrdinalIgnoreCase)) ||
-                    !lines.Any(
-                        h => h.Equals("X-Netcontroll-Client: chrome-v1", StringComparison.OrdinalIgnoreCase)) ||
-                    lines.Any(
-                        h => h.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase) &&
-                             !h.StartsWith("Origin: chrome-extension://", StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidDataException();
+                if (!ValidControlHeaders(lines))
+                {
+                    await JsonResponse(input, 403, new { error = "درخواست افزونه معتبر نیست." }).ConfigureAwait(false);
+                    return;
+                }
+                if (request[1] == "/chrome-site/")
+                {
+                    await ChangeChromeSite(input, request, lines, data, split + 4).ConfigureAwait(false);
+                    return;
+                }
+                if (request[0] != "GET" || !request[1].StartsWith("/chrome-rules/", StringComparison.Ordinal))
+                {
+                    await JsonResponse(input, 404, new { error = "مسیر درخواستی وجود ندارد." }).ConfigureAwait(false);
+                    return;
+                }
                 string revision = request[1].Substring("/chrome-rules/".Length);
                 Task change;
                 lock (gate)
@@ -225,21 +257,7 @@ public sealed class Router : IDisposable
                     change = revision == policyRevision ? policyChanged.Task : Task.CompletedTask;
                 }
                 await Task.WhenAny(change, Task.Delay(18000)).ConfigureAwait(false);
-                string json;
-                lock (gate) json =
-                    Settings.Text(new { revision = policyRevision,
-                                        rules = settings.Domains.Where(x => x.Enabled)
-                                                    .OrderByDescending(x => x.Target.Length)
-                                                    .Select(x => new { host = x.Target, sub = x.Subdomains,
-                                                                       route = x.Mode != PathMode.System })
-                                                    .ToArray() });
-                byte[] body = Encoding.UTF8.GetBytes(json);
-                byte[] header = Encoding.ASCII.GetBytes(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: " +
-                    "no-store\r\nConnection: close\r\nContent-Length: " +
-                    body.Length + "\r\n\r\n");
-                await input.WriteAsync(header, 0, header.Length).ConfigureAwait(false);
-                await input.WriteAsync(body, 0, body.Length).ConfigureAwait(false);
+                await JsonResponse(input, 200, ChromePolicy()).ConfigureAwait(false);
                 return;
             }
             bool tunnel = request[0] == "CONNECT";
@@ -329,10 +347,141 @@ public sealed class Router : IDisposable
             capacity.Release();
         }
     }
+    object ChromePolicy()
+    {
+        lock (gate)
+            return new {
+                revision = policyRevision,
+                token = mutationToken,
+                defaultMode = (int)settings.ChromeDefault,
+                defaultRoute = settings.ChromeDefault != PathMode.System,
+                rules = settings.Domains.Where(x => x.Enabled)
+                            .OrderByDescending(x => x.Target.Length)
+                            .Select(x => new { host = x.Target, sub = x.Subdomains,
+                                               mode = (int)x.Mode, route = x.Mode != PathMode.System }).ToArray()
+            };
+    }
+    static string SingleHeader(string[] lines, string name)
+    {
+        string prefix = name + ":";
+        string[] matches = lines.Skip(1).Where(h => h.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+        return matches.Length == 1 ? matches[0].Substring(prefix.Length).Trim() : null;
+    }
+    bool ValidControlHeaders(string[] lines)
+    {
+        if (!String.Equals(SingleHeader(lines, "Host"), "127.0.0.1:" + chromePort, StringComparison.OrdinalIgnoreCase) ||
+            SingleHeader(lines, "X-Netcontroll-Client") != "chrome-v1")
+            return false;
+        string[] origins = lines.Skip(1).Where(h => h.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (origins.Length == 0)
+            return true; // Extension fetch may omit Origin; web pages cannot send our header without CORS.
+        string origin = SingleHeader(lines, "Origin");
+        const string scheme = "chrome-extension://";
+        return origin != null && origin.StartsWith(scheme, StringComparison.Ordinal) &&
+               origin.Length == scheme.Length + 32 && origin.Substring(scheme.Length).All(c => c >= 'a' && c <= 'p');
+    }
+    bool TokenMatches(string value)
+    {
+        if (value == null || value.Length != mutationToken.Length)
+            return false;
+        int difference = 0;
+        for (int i = 0; i < value.Length; i++)
+            difference |= value[i] ^ mutationToken[i];
+        return difference == 0;
+    }
+    sealed class SiteRequest
+    {
+        public string host { get; set; }
+        public string mode { get; set; }
+        public bool subdomains { get; set; }
+    }
+    async Task ChangeChromeSite(NetworkStream input, string[] request, string[] lines, byte[] initial, int bodyOffset)
+    {
+        if (request[0] != "POST")
+        {
+            await JsonResponse(input, 405, new { error = "این درخواست باید با POST ارسال شود." }).ConfigureAwait(false);
+            return;
+        }
+        if (!TokenMatches(SingleHeader(lines, "X-Netcontroll-Token")))
+        {
+            await JsonResponse(input, 403, new { error = "اتصال برنامه تغییر کرده است. افزونه را دوباره باز کنید." }).ConfigureAwait(false);
+            return;
+        }
+        var handler = ChromeRuleRequested;
+        if (handler == null)
+        {
+            await JsonResponse(input, 503, new { error = "پنجرهٔ برنامه هنوز آماده نیست. دوباره تلاش کنید." }).ConfigureAwait(false);
+            return;
+        }
+        ChromeRuleChange change;
+        try
+        {
+            int length;
+            string contentType = SingleHeader(lines, "Content-Type");
+            if (contentType == null || !String.Equals(contentType.Split(';')[0].Trim(), "application/json", StringComparison.OrdinalIgnoreCase) ||
+                !Int32.TryParse(SingleHeader(lines, "Content-Length"), out length) || length <= 0 || length > 4096 ||
+                lines.Skip(1).Any(h => h.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("بدنهٔ درخواست معتبر نیست.");
+            var bytes = new byte[length];
+            int copied = Math.Min(length, initial.Length - bodyOffset);
+            if (copied > 0)
+                Buffer.BlockCopy(initial, bodyOffset, bytes, 0, copied);
+            while (copied < length)
+            {
+                var read = input.ReadAsync(bytes, copied, length - copied);
+                if (await Task.WhenAny(read, Task.Delay(5000)).ConfigureAwait(false) != read)
+                    throw new IOException("دریافت درخواست تمام نشد.");
+                int count = await read.ConfigureAwait(false);
+                if (count == 0)
+                    throw new EndOfStreamException();
+                copied += count;
+            }
+            var body = Settings.Json<SiteRequest>(new UTF8Encoding(false, true).GetString(bytes));
+            if (body == null || (body.mode != "direct" && body.mode != "vpn" && body.mode != "system" && body.mode != "default"))
+                throw new ArgumentException("مسیر انتخاب‌شده معتبر نیست.");
+            change = new ChromeRuleChange {
+                Host = Settings.Host(body.host), Subdomains = body.subdomains, Remove = body.mode == "default",
+                Mode = body.mode == "vpn" ? PathMode.Vpn : body.mode == "direct" ? PathMode.Direct : PathMode.System
+            };
+            if (change.Host == "localhost" || change.Host.EndsWith(".localhost", StringComparison.Ordinal))
+                throw new ArgumentException("اتصال‌های محلی مرورگر از پراکسی عبور نمی‌کنند.");
+        }
+        catch (Exception ex)
+        {
+            await JsonResponse(input, 400, new { error = "درخواست معتبر نیست. " + ex.GetBaseException().Message }).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            bool applied = await handler(change).ConfigureAwait(false);
+            if (!applied)
+                await JsonResponse(input, 409, new { error = "برنامه مشغول ثبت تغییر دیگری است. دوباره تلاش کنید." }).ConfigureAwait(false);
+            else
+                await JsonResponse(input, 200, ChromePolicy()).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await JsonResponse(input, 500, new { error = "قانون ذخیره نشد. " + ex.GetBaseException().Message }).ConfigureAwait(false);
+        }
+    }
+    static async Task JsonResponse(NetworkStream stream, int status, object value)
+    {
+        byte[] body = Encoding.UTF8.GetBytes(Settings.Text(value));
+        string reason = status == 200 ? "OK" : status == 400 ? "Bad Request" : status == 403 ? "Forbidden"
+            : status == 404 ? "Not Found" : status == 405 ? "Method Not Allowed" : status == 409 ? "Conflict"
+            : status == 503 ? "Service Unavailable" : "Internal Server Error";
+        byte[] header = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " " + reason +
+            "\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n" +
+            "X-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: " + body.Length + "\r\n\r\n");
+        await stream.WriteAsync(header, 0, header.Length).ConfigureAwait(false);
+        await stream.WriteAsync(body, 0, body.Length).ConfigureAwait(false);
+    }
     public void Dispose()
     {
         lock (gate)
         {
+            ChromeRuleRequested = null;
+            policyChanged.TrySetResult(true);
             foreach (var l in listeners.Values)
                 l.Stop();
             listeners.Clear();

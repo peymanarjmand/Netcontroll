@@ -1,1 +1,49 @@
-<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><title>Netcontroll</title><style>body{width:265px;background:#181A26;color:#F0F1FA;font:14px Tahoma,sans-serif;padding:16px;line-height:1.8}h2{color:#C9BAFF}button{border:0;padding:9px;background:#B9A8FF;color:#201738;border-radius:8px;cursor:pointer}p{min-height:40px}</style><h2>Netcontroll</h2><p id="state"></p><button id="toggle" disabled></button><script src="popup.js"></script></html>
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Netcontroll · مسیر این سایت</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="brand">
+    <div class="brand-label"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18V6l14 12V6"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/></svg></span><div><strong dir="ltr">Netcontroll</strong><small>کنترل هوشمند مسیر شبکه</small></div></div>
+    <span id="badge" class="badge pending">بررسی اتصال</span>
+  </header>
+  <main>
+    <section class="connection" aria-label="وضعیت پروفایل">
+      <div class="section-heading"><h1>پروفایل Chrome</h1><span id="count" class="muted"></span></div>
+      <p id="state" role="status" aria-live="polite">در حال دریافت وضعیت برنامه…</p>
+      <div class="default-row"><span>مسیر پیش‌فرض</span><strong id="default-mode">—</strong></div>
+      <button id="toggle" class="connect" disabled>در حال بررسی…</button>
+    </section>
+    <section class="site-card" aria-labelledby="site-heading">
+      <div class="section-heading"><h2 id="site-heading">مسیر این سایت</h2><span class="eyebrow">قانون دامنه</span></div>
+      <div id="host" class="host" dir="ltr">—</div>
+      <p id="site-status" class="site-status">برای انتخاب مسیر، افزونه را در تب سایت باز کنید.</p>
+      <div class="routes" role="group" aria-label="مسیر سایت">
+        <button id="route-direct" class="route" data-route="direct" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9a14 14 0 0 1 18 0M6 12a9 9 0 0 1 12 0M9 15a4 4 0 0 1 6 0"/><circle cx="12" cy="18" r="1"/></svg>
+          <span>اینترنت عادی</span>
+        </button>
+        <button id="route-vpn" class="route" data-route="vpn" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9S4 17 4 12V6zM8.5 12l2.5 2.5 4.5-5"/></svg>
+          <span>فقط VPN</span>
+        </button>
+        <button id="route-system" class="route" data-route="system" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <span>مسیر سیستم</span>
+        </button>
+      </div>
+      <label class="check"><input id="subdomains" type="checkbox" disabled><span>زیردامنه‌های این میزبان هم شامل شوند</span></label>
+      <div class="site-actions"><button id="reset" class="text-button" disabled>حذف قانون اختصاصی</button><button id="reload" class="text-button" disabled>تازه‌کردن تب ↻</button></div>
+    </section>
+    <p id="notice" class="notice" aria-live="polite">این انتخاب برای دامنهٔ سایت است و روی تب‌های هم‌دامنه نیز اعمال می‌شود. برای جداسازی کامل، پنجرهٔ VPN مجزا را از برنامه باز کنید.</p>
+    <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+    <button id="refresh" class="refresh" aria-label="بررسی دوباره وضعیت">بررسی دوبارهٔ اتصال ↻</button>
+  </main>
+  <footer><span>توسعه‌دهنده</span><a href="mailto:peymanarjmand308@gmail.com" dir="ltr">peymanarjmand308@gmail.com</a></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

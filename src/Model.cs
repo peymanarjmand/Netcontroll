@@ -31,6 +31,13 @@ public class Rule
         return (Rule)MemberwiseClone();
     }
 }
+public sealed class ChromeRuleChange
+{
+    public string Host { get; set; }
+    public PathMode Mode { get; set; }
+    public bool Remove { get; set; }
+    public bool Subdomains { get; set; }
+}
 public class Settings
 {
     public List<Rule> Domains { get; set; } = new List<Rule>();
@@ -38,6 +45,12 @@ public class Settings
     public List<Rule> Apps { get; set; } = new List<Rule>();
     public Dictionary<string, string> Labels { get; set; } = new Dictionary<string, string>();
     public PathMode Docker { get; set; } = PathMode.System;
+    // Keep System for files written before default routing was introduced.
+    // New installs opt into Direct in Load; upgrading never changes an existing route.
+    public PathMode ChromeDefault { get; set; } = PathMode.System;
+    public PathMode Codex { get; set; } = PathMode.Vpn;
+    public string CodexExecutable { get; set; } = "";
+    public bool WindowsDefaultDirect { get; set; }
     public static string Folder
     {
         get {
@@ -53,7 +66,12 @@ public class Settings
     }
     public static Settings Load()
     {
-        return File.Exists(FileName) ? Json<Settings>(File.ReadAllText(FileName)) : new Settings();
+        var value = File.Exists(FileName) ? Json<Settings>(File.ReadAllText(FileName))
+                                         : new Settings { ChromeDefault = PathMode.Direct };
+        if (value == null)
+            throw new InvalidDataException("فایل تنظیمات برنامه معتبر نیست.");
+        value.Validate();
+        return value;
     }
     public static T Json<T>(string value)
     {
@@ -66,6 +84,43 @@ public class Settings
     public Settings Clone()
     {
         return Json<Settings>(Text(this));
+    }
+    public void Validate()
+    {
+        if (Domains == null || Addresses == null || Apps == null || Labels == null ||
+            !ValidMode(ChromeDefault) || !ValidMode(Docker) || !ValidMode(Codex) ||
+            Domains.Concat(Addresses).Concat(Apps).Any(r => r == null || !ValidMode(r.Mode)))
+            throw new InvalidDataException("تنظیمات مسیر اتصال معتبر نیست.");
+        CodexExecutable = CodexExecutable ?? "";
+    }
+    public static bool ValidMode(PathMode mode)
+    {
+        return mode == PathMode.System || mode == PathMode.Direct || mode == PathMode.Vpn;
+    }
+    public Settings WithChromeRule(ChromeRuleChange change)
+    {
+        if (change == null || !ValidMode(change.Mode))
+            throw new ArgumentException("مسیر دامنه معتبر نیست.");
+        string host = Host(change.Host);
+        if (host == "localhost" || host.EndsWith(".localhost", StringComparison.Ordinal))
+            throw new ArgumentException("اتصال‌های محلی مرورگر از پراکسی عبور نمی‌کنند.");
+        var next = Clone();
+        var rule = next.Domains.FirstOrDefault(r => String.Equals(r.Target, host, StringComparison.OrdinalIgnoreCase));
+        if (change.Remove)
+            next.Domains.RemoveAll(r => String.Equals(r.Target, host, StringComparison.OrdinalIgnoreCase));
+        else
+        {
+            if (rule == null)
+            {
+                rule = new Rule { Name = host, Target = host };
+                next.Domains.Add(rule);
+            }
+            rule.Mode = change.Mode;
+            rule.Subdomains = change.Subdomains;
+            rule.Enabled = true;
+            next.Domains.RemoveAll(r => r != rule && String.Equals(r.Target, host, StringComparison.OrdinalIgnoreCase));
+        }
+        return next;
     }
     public void Save()
     {
@@ -87,6 +142,8 @@ public class Settings
     }
     public static string Host(string input)
     {
+        if (String.IsNullOrWhiteSpace(input))
+            throw new ArgumentException("نام دامنه را وارد کنید.");
         string host = input.Trim().TrimEnd('.');
         if (host.StartsWith("*."))
             host = host.Substring(2);
@@ -116,7 +173,7 @@ public class Settings
                                           (x.Subdomains && h.EndsWith("." + x.Target, StringComparison.Ordinal))))
                 .OrderByDescending(x => x.Target.Length)
                 .FirstOrDefault();
-        return rule == null ? PathMode.System : rule.Mode;
+        return rule == null ? ChromeDefault : rule.Mode;
     }
 }
 }
