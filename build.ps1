@@ -6,6 +6,7 @@ $payload=Join-Path $out 'payload'
 $dist=Join-Path $root 'dist'
 foreach($dir in $out,$payload,$dist){[void][IO.Directory]::CreateDirectory($dir)}
 $locator=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+if (!(Test-Path -LiteralPath $locator)) { throw 'Install Visual Studio Build Tools with MSBuild and the .NET Framework 4.8 targeting pack, then run build.ps1 again.' }
 $compiler=(& $locator -latest -products '*' -find 'MSBuild\Current\Bin\Roslyn\csc.exe'|Select-Object -First 1)
 if(!$compiler){throw 'Install Visual Studio Build Tools with MSBuild and the C# compiler.'}
 $fw=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
@@ -14,10 +15,12 @@ $refs+=@('WindowsBase','PresentationCore','PresentationFramework')|ForEach-Objec
 Add-Type -AssemblyName System.Drawing
 $bmp=New-Object Drawing.Bitmap 64,64
 $g=[Drawing.Graphics]::FromImage($bmp)
-$g.SmoothingMode='AntiAlias';$g.Clear([Drawing.ColorTranslator]::FromHtml('#252337'))
-$pen=New-Object Drawing.Pen ([Drawing.ColorTranslator]::FromHtml('#B9A8FF')),7
+$g.SmoothingMode='AntiAlias';$g.Clear([Drawing.ColorTranslator]::FromHtml('#18191E'))
+$pen=New-Object Drawing.Pen ([Drawing.ColorTranslator]::FromHtml('#F64908')),7
 $pen.StartCap='Round';$pen.EndCap='Round'
 $g.DrawLine($pen,15,49,15,15);$g.DrawLine($pen,15,15,49,49);$g.DrawLine($pen,49,49,49,15)
+$node=New-Object Drawing.SolidBrush ([Drawing.ColorTranslator]::FromHtml('#2DBAA8'))
+$g.FillEllipse($node,9,43,12,12);$g.FillEllipse($node,43,9,12,12);$node.Dispose()
 $ico=Join-Path $out 'netcontroll.ico'
 $file=[IO.File]::Create($ico);try{[Drawing.Icon]::FromHandle($bmp.GetHicon()).Save($file)}finally{$file.Dispose();$g.Dispose();$bmp.Dispose();$pen.Dispose()}
 $common=@('/nologo','/noconfig','/nostdlib+','/langversion:7.3','/platform:x64','/optimize+','/utf8output','/codepage:65001','/deterministic+','/target:winexe',('/win32icon:'+$ico),('/win32manifest:'+(Join-Path $root 'src\app.manifest')))+$refs
@@ -27,7 +30,7 @@ $inputs=@(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs'|ForE
 & $compiler @common ('/out:'+(Join-Path $payload 'Netcontroll.exe')) @inputs $themeCode
 if($LASTEXITCODE){throw 'Desktop build failed.'}
 Copy-Item -LiteralPath (Join-Path $root 'src\Main.xaml'),(Join-Path $root 'README.md') -Destination $payload -Force
-foreach($name in 'chrome','system'){
+foreach($name in 'chrome','system','docs'){
     $to=Join-Path $payload $name;[void][IO.Directory]::CreateDirectory($to)
     Get-ChildItem -LiteralPath (Join-Path $root $name) -File|Copy-Item -Destination $to -Force
 }

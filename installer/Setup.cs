@@ -27,7 +27,8 @@ static class Setup
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Netcontroll";
     static readonly string[] Files = {
         "Netcontroll.exe",  "Main.xaml",         @"chrome\manifest.json", @"chrome\popup.html",
-        @"chrome\popup.js", @"chrome\worker.js", @"system\Routes.ps1",    @"system\SavedRoutes.ps1",
+        @"chrome\popup.js", @"chrome\popup.css", @"chrome\worker.js", @"system\Routes.ps1",    @"system\SavedRoutes.ps1", @"system\DefaultDirect.ps1",
+        @"docs\ACCEPTANCE.fa.md", @"docs\CodexDesktop-Troubleshooting.fa.md", @"docs\RELEASE-2.0.fa.md",
         "README.md"
     };
     static void EnterDesktopMutex(Mutex mutex)
@@ -224,7 +225,7 @@ static class Setup
             if (File.Exists(path))
                 File.Delete(path);
         }
-        foreach (string sub in new[] { "chrome", "system" })
+        foreach (string sub in new[] { "chrome", "system", "docs" })
         {
             string p = Path.Combine(dir, sub);
             if (Directory.Exists(p) && !Directory.EnumerateFileSystemEntries(p).Any())

@@ -1,5 +1,6 @@
-[CmdletBinding()]param([switch]$Live,[switch]$Container)
+﻿[CmdletBinding()]param([switch]$Live,[switch]$Container)
 $ErrorActionPreference='Stop'
+if([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA'){throw 'Run with Windows PowerShell -STA for the native WPF checks'}
 $root=Split-Path $PSScriptRoot
 $area=Join-Path (Join-Path $root 'build') ('smoke-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($area)
@@ -70,11 +71,73 @@ try{
     try{
         $window.ShowInTaskbar=$false;$window.ShowActivated=$false;$window.WindowStartupLocation='Manual';$window.Left=-15000;$window.Top=0;$window.Show();$window.UpdateLayout()
         $window.Content.Background=$window.Background
-        Check ($window.FindName('Nav').Children.Count -eq 5 -and $window.FindName('Rows').Children.Count -eq 2) 'WPF navigation and domain rows'
-        $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap([int][Math]::Ceiling($window.Content.ActualWidth),[int][Math]::Ceiling($window.Content.ActualHeight),96,96,[Windows.Media.PixelFormats]::Pbgra32)
-        $bitmap.Render($window.Content)
-        $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder;$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
-        $shot=[IO.File]::Create((Join-Path $area 'dashboard.png'));try{$encoder.Save($shot)}finally{$shot.Dispose()}
+        function Flush-Layout {
+            $window.UpdateLayout()
+            [void]$window.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::ApplicationIdle)
+            $window.UpdateLayout()
+        }
+        function Navigate-Page([string]$key) {
+            $button=@($window.FindName('Nav').Children|Where-Object {
+                $_ -is [Windows.Controls.Button] -and [Windows.Automation.AutomationProperties]::GetAutomationId($_) -eq ('Nav.'+$key)
+            })
+            Check ($button.Count -eq 1) "navigation button $key"
+            $button[0].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+            Flush-Layout
+        }
+        function Save-View([string]$name) {
+            Flush-Layout
+            $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap([int][Math]::Ceiling($window.Content.ActualWidth),[int][Math]::Ceiling($window.Content.ActualHeight),96,96,[Windows.Media.PixelFormats]::Pbgra32)
+            $bitmap.Render($window.Content)
+            $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+            $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+            $shot=[IO.File]::Create((Join-Path $area ($name+'.png')))
+            try{$encoder.Save($shot)}finally{$shot.Dispose()}
+        }
+        $navigation=@($window.FindName('Nav').Children|Where-Object {$_ -is [Windows.Controls.Button]})
+        Check ($navigation.Count -eq 8) 'eight navigation destinations, excluding group labels'
+        Check ($window.FindName('OverviewHero').Visibility -eq 'Visible' -and $window.FindName('SearchPanel').Visibility -eq 'Collapsed') 'overview is the initial page'
+        Check ($window.FindName('DeveloperEmail').Text -eq 'peymanarjmand308@gmail.com') 'exact developer email'
+        Check ($window.FindName('Title').FontSize -le 24 -and $window.FindName('Search').FontSize -le 14) 'compact desktop typography'
+        Save-View 'dashboard'
+        foreach($layout in @(@(1250,820),@(960,680),@(760,560))){
+            $window.Width=$layout[0];$window.Height=$layout[1]
+            Flush-Layout
+            Navigate-Page 'chrome'
+            Check ($window.FindName('Rows').Children.Count -eq 2) "both domain rules at $($layout -join 'x')"
+            Check ($window.FindName('PolicyPanel').Children.Count -eq 1) 'browser default policy is visible'
+            Check ($window.FindName('ChromeStatePanel').Visibility -eq 'Visible') 'extension acknowledgement status is visible'
+            $expectedSidebar=if($layout[0] -lt 1120){72}else{228}
+            Check ($window.FindName('Sidebar').Width -eq $expectedSidebar) "responsive sidebar at $($layout -join 'x')"
+            foreach($row in $window.FindName('Rows').Children){
+                Check ($row.ActualHeight -ge 60 -and $row.ActualHeight -le 110) 'compact rule row height'
+                Check ($row.ActualWidth -le $window.FindName('ContentScroll').ViewportWidth+1) 'rule row fits viewport'
+            }
+            $window.FindName('Search').Text='assets'
+            Flush-Layout
+            Check ($window.FindName('Rows').Children.Count -eq 1) 'search narrows the rule list without mutation'
+            $window.FindName('Search').Text='no-match-'+[guid]::NewGuid().ToString('N')
+            Flush-Layout
+            Check ($window.FindName('EmptyPanel').Visibility -eq 'Visible') 'filtered empty state'
+            $window.FindName('Search').Clear()
+            Flush-Layout
+            Save-View ('chrome-'+($layout -join 'x'))
+        }
+        $window.Width=1250;$window.Height=820;Flush-Layout
+        Navigate-Page 'codex'
+        Check ($window.FindName('Rows').Children.Count -ge 3 -and $window.FindName('SearchPanel').Visibility -eq 'Collapsed') 'Codex Desktop preset and observed connection status'
+        Save-View 'codex'
+        Navigate-Page 'docker'
+        Check ($window.FindName('Rows').Children.Count -eq 3) 'Docker route, setup, and observed connection sections'
+        Navigate-Page 'apps'
+        Check ($window.FindName('ResultCount').Text -like '0 *') 'empty app guide does not count as an app rule'
+        Navigate-Page 'activity'
+        Check ($window.FindName('Filters').Children.Count -eq 4) 'activity route and failure filters'
+        Navigate-Page 'about'
+        Check ($window.FindName('Rows').Children.Count -ge 4) 'scope guidance and developer details'
+        Save-View 'about'
+        # Do not navigate to IPs here: its legacy discovery can import known rules into
+        # the real user's settings. Native route discovery has its own opt-in tests.
+        Check ($s.Domains.Count -eq 2 -and $s.ChromeDefault -eq 'System') 'UI navigation and filters preserve fixture policy'
     }finally{$shell.Dispose();$window.Hide()}
     if($Live){
         $chrome=Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'

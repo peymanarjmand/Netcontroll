@@ -38,7 +38,14 @@ internal static class Theme
         window.SourceInitialized += (s, e) =>
         {
             int dark = 1;
-            DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 20, ref dark, sizeof(int));
+            try
+            {
+                DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 20, ref dark, sizeof(int));
+                int round = 2;
+                DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 33, ref round, sizeof(int));
+            }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
         };
     }
 }
