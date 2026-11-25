@@ -8,12 +8,13 @@ $taskName='Netcontroll - IPv4 routes'
 $legacyName='Direct IPv4 routes for four servers'
 $legacyGuard='DirectServerRoutes-BlockOpenVPN'
 $metric=1731
+. (Join-Path $PSScriptRoot 'DefaultDirect.ps1')
 $lock=New-Object Threading.Mutex($false,'Global\Netcontroll.RouteSettings.v1')
 try { $entered=$lock.WaitOne(20000) } catch [Threading.AbandonedMutexException] { $entered=$true }
 if(!$entered){throw 'Route manager is busy'}
 function Read-Config {
     if(Test-Path -LiteralPath $config){return (Get-Content -LiteralPath $config -Raw -Encoding UTF8 | ConvertFrom-Json)}
-    return [pscustomobject]@{Rules=@();Apps=@();Tracked=@();Legacy=@();Adopted=$false}
+    return [pscustomobject]@{Rules=@();Apps=@();Tracked=@();Legacy=@();Adopted=$false;WindowsDefaultDirect=$false}
 }
 function Write-Config($data) {
     $temp=Join-Path $root ([Guid]::NewGuid().ToString('N')+'.tmp')
@@ -44,6 +45,7 @@ function Reconcile($state){
     $default=@($all|Where-Object {$_.State -ne 'Dead' -and $_.DestinationPrefix -in '0.0.0.0/0','0.0.0.0/1','128.0.0.0/1'} | Sort-Object @{Expression={[long]$_.RouteMetric+[long]$_.InterfaceMetric}},ifIndex,NextHop)
     $direct=$default|Where-Object {$_.DestinationPrefix -eq '0.0.0.0/0' -and $_.ifIndex -in @($physical|Where-Object Status -eq 'Up'|ForEach-Object ifIndex)}|Select-Object -First 1
     $vpn=$default|Where-Object {$_.ifIndex -in @($vpns|Where-Object Status -eq 'Up'|ForEach-Object ifIndex)}|Select-Object -First 1
+    Set-NcDefaultDirect ([bool]$state.WindowsDefaultDirect) $physical $vpns $direct
     Set-Guard 'Direct' @($state.Rules|Where-Object Mode -eq 'Direct'|ForEach-Object IP) @($vpns|ForEach-Object Name)
     Set-Guard 'VPN' @($state.Rules|Where-Object Mode -eq 'Vpn'|ForEach-Object IP) @($physical|ForEach-Object Name)
     $keep=@()
@@ -88,14 +90,17 @@ function Resume-Legacy {
 }
 try {
     $old=Read-Config
-    if($Action -eq 'Refresh'){Reconcile $old;return}
+    if($Action -eq 'Refresh'){
+        try { Reconcile $old; Write-NcRouteStatus $old $true '' }
+        catch { Write-NcRouteStatus $old $false $_.Exception.Message; throw }
+        return
+    }
     if($Action -eq 'Remove'){
-        if(!(Test-Path -LiteralPath $config)){return}
-        $empty=[pscustomobject]@{Rules=@();Tracked=$old.Tracked}
+        $empty=[pscustomobject]@{Rules=@();Apps=@();Tracked=$old.Tracked;WindowsDefaultDirect=$false}
         Reconcile $empty
         if($old.Adopted){Resume-Legacy}
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-        foreach($item in 'previous.json','routes.json','Routes.ps1'){Remove-Item -LiteralPath (Join-Path $root $item) -ErrorAction SilentlyContinue}
+        foreach($item in 'previous.json','routes.json','Routes.ps1','DefaultDirect.ps1','default-direct-owned.json','route-status.json'){Remove-Item -LiteralPath (Join-Path $root $item) -ErrorAction SilentlyContinue}
         return
     }
     $data=Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8|ConvertFrom-Json
@@ -111,6 +116,11 @@ try {
         if($a.Id -notmatch '^[0-9a-f]{32}$' -or $a.Mode -notin 'Vpn','Direct' -or $a.Program -notmatch '^[a-zA-Z]:\\' -or [IO.Path]::GetExtension($a.Program) -ne '.exe' -or $a.Id -in $apps.Id){throw 'Invalid application rule'}
         $apps+=[pscustomobject]@{Id=$a.Id;Program=[IO.Path]::GetFullPath($a.Program);Mode=$a.Mode}
     }
+    $defaultDirect=[bool]$old.WindowsDefaultDirect
+    if (!$AppsOnly -and $data.PSObject.Properties['WindowsDefaultDirect']) {
+        if ($data.WindowsDefaultDirect -isnot [bool]) { throw 'WindowsDefaultDirect must be a JSON boolean' }
+        $defaultDirect=$data.WindowsDefaultDirect
+    }
     $legacy=@($old.Legacy);$adopting=$false
     if($TakeOver -and !$old.Adopted){
         $legacyFile=Join-Path $env:ProgramFiles 'DirectServerRoutes\Update-Routes.ps1'
@@ -121,10 +131,13 @@ try {
         if(!$legacy.Count){throw 'Legacy addresses not found'}
         $adopting=$true
     }
-    $next=[pscustomobject]@{Rules=$rules;Apps=$apps;Tracked=@(@($old.Tracked)+@($rules|ForEach-Object IP)+$legacy|Sort-Object -Unique);Legacy=$legacy;Adopted=($adopting -or $old.Adopted)}
+    $next=[pscustomobject]@{Rules=$rules;Apps=$apps;Tracked=@(@($old.Tracked)+@($rules|ForEach-Object IP)+$legacy|Sort-Object -Unique);Legacy=$legacy;Adopted=($adopting -or $old.Adopted);WindowsDefaultDirect=$defaultDirect}
     [void][IO.Directory]::CreateDirectory($root)
     if((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Unexpected route agent folder'}
-    Copy-Item -LiteralPath $PSCommandPath -Destination $agent -Force
+    if ([IO.Path]::GetFullPath($PSCommandPath) -ne [IO.Path]::GetFullPath($agent)) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DefaultDirect.ps1') -Destination (Join-Path $root 'DefaultDirect.ps1') -Force
+        Copy-Item -LiteralPath $PSCommandPath -Destination $agent -Force
+    }
     try {
         if($adopting){
             Disable-ScheduledTask -TaskName $legacyName | Out-Null
@@ -133,14 +146,15 @@ try {
                 Get-NetRoute -DestinationPrefix ($ip+'/32') -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Where-Object RouteMetric -eq 17|Remove-NetRoute -Confirm:$false
             }
         }
+        Register-Agent
         Reconcile $next
         if($adopting){Disable-NetFirewallRule -Name $legacyGuard}
         Write-Config $next
-        Register-Agent
+        Write-NcRouteStatus $next $true ''
     }catch{
         $cause=$_
-        $restore=[pscustomobject]@{Rules=$old.Rules;Apps=$old.Apps;Tracked=$next.Tracked}
-        try{Reconcile $restore;Write-Config $old}finally{if($adopting){Resume-Legacy}}
+        $restore=[pscustomobject]@{Rules=$old.Rules;Apps=$old.Apps;Tracked=$next.Tracked;WindowsDefaultDirect=[bool]$old.WindowsDefaultDirect}
+        try{Reconcile $restore;Write-Config $old;Write-NcRouteStatus $old $false $cause.Exception.Message}finally{if($adopting){Resume-Legacy}}
         throw $cause
     }
 }finally{$lock.ReleaseMutex();$lock.Dispose()}
